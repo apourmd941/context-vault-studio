@@ -18,6 +18,10 @@ WORKSPACE_CONFIG_PATH = STATE_DIR / "workspace_config.json"
 LAST_RESULT_PATH = STATE_DIR / "last_result.json"
 PRESETS_PATH = STATE_DIR / "presets.json"
 BUILD_HISTORY_PATH = STATE_DIR / "build_history.json"
+BOOKMARKS_PATH = STATE_DIR / "bookmarks.json"
+LAYOUT_PATH = STATE_DIR / "layout.json"
+SNAPSHOTS_PATH = STATE_DIR / "snapshots.json"
+CANVASES_PATH = STATE_DIR / "canvases.json"
 STARTER_CONFIG_PATH = REPO_ROOT / "configs" / "starter_workspace.json"
 LOCAL_NEUTRON_EXAMPLE_PATH = REPO_ROOT / "config" / "neutron_curated.example.json"
 
@@ -150,6 +154,118 @@ def append_build_history(entry: dict) -> None:
     history = load_build_history()
     history.insert(0, entry)
     _write_json(BUILD_HISTORY_PATH, history[:50])
+
+
+def load_bookmarks() -> list[dict]:
+    payload = _read_json(BOOKMARKS_PATH)
+    return payload if isinstance(payload, list) else []
+
+
+def save_bookmarks(bookmarks: list[dict]) -> None:
+    _write_json(BOOKMARKS_PATH, bookmarks)
+
+
+def add_bookmark(bookmark: dict) -> dict:
+    bookmarks = load_bookmarks()
+    record = {
+        "id": str(uuid.uuid4()),
+        "created_at": _now_iso(),
+        **bookmark,
+    }
+    bookmarks.insert(0, record)
+    save_bookmarks(bookmarks[:200])
+    return record
+
+
+def delete_bookmark(bookmark_id: str) -> None:
+    save_bookmarks([item for item in load_bookmarks() if item["id"] != bookmark_id])
+
+
+def load_layout() -> dict:
+    payload = _read_json(LAYOUT_PATH)
+    if isinstance(payload, dict):
+        return payload
+    return {
+        "active_tab": "vault",
+        "selected_file_path": None,
+        "expanded_nodes": [],
+        "graph_local_depth": 0,
+        "graph_source_filter": "all",
+        "graph_pinned_nodes": [],
+        "graph_viewport": {"x": 0, "y": 0, "scale": 1},
+    }
+
+
+def save_layout(layout: dict) -> None:
+    _write_json(LAYOUT_PATH, layout)
+
+
+def load_snapshots() -> list[dict]:
+    payload = _read_json(SNAPSHOTS_PATH)
+    return payload if isinstance(payload, list) else []
+
+
+def append_snapshot(snapshot: dict) -> dict:
+    snapshots = load_snapshots()
+    record = {
+        "id": str(uuid.uuid4()),
+        "created_at": _now_iso(),
+        **snapshot,
+    }
+    snapshots.insert(0, record)
+    _write_json(SNAPSHOTS_PATH, snapshots[:200])
+    return record
+
+
+def load_canvases() -> list[dict]:
+    payload = _read_json(CANVASES_PATH)
+    if isinstance(payload, list):
+        return payload
+    return [
+        {
+            "id": "main-canvas",
+            "name": "Main Canvas",
+            "description": "Default board for linking important files and ideas.",
+            "cards": [],
+            "edges": [],
+            "created_at": _now_iso(),
+            "updated_at": _now_iso(),
+        }
+    ]
+
+
+def save_canvases(canvases: list[dict]) -> None:
+    _write_json(CANVASES_PATH, canvases)
+
+
+def upsert_canvas(*, canvas_id: str | None, payload: dict) -> dict:
+    canvases = load_canvases()
+    now = _now_iso()
+    target_id = canvas_id or str(uuid.uuid4())
+    replacement = {
+        "id": target_id,
+        "created_at": now,
+        "updated_at": now,
+        **payload,
+    }
+
+    next_canvases: list[dict] = []
+    found = False
+    for canvas in canvases:
+        if canvas["id"] == target_id:
+            replacement["created_at"] = canvas.get("created_at", now)
+            next_canvases.append(replacement)
+            found = True
+        else:
+            next_canvases.append(canvas)
+    if not found:
+        next_canvases.append(replacement)
+    save_canvases(next_canvases)
+    return replacement
+
+
+def delete_canvas(canvas_id: str) -> None:
+    save_canvases([canvas for canvas in load_canvases() if canvas["id"] != canvas_id])
 
 
 def load_workspace_config() -> dict:

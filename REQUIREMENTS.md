@@ -87,6 +87,17 @@ npm --prefix frontend test
 npm --prefix frontend run build
 ```
 
+## Operator Features
+
+- access-controlled path inspection
+- async preview and build jobs
+- explorer and quick switcher
+- markdown, image, and PDF preview
+- text note editing and note creation
+- bookmarks and snapshots
+- canvas board view
+- export bundle creation
+
 ## Distribution Notes
 
 - The app is local-first and does not require cloud secrets.

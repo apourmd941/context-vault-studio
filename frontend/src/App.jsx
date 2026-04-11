@@ -1,21 +1,32 @@
 import { startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
 
+import BookmarkPanel from "./BookmarkPanel";
+import CanvasBoard from "./CanvasBoard";
 import ExplorerPane from "./ExplorerPane";
 import GraphMap from "./GraphMap";
 import {
+  createBookmark,
+  createCanvas,
+  createFile,
   createJob,
   createPreset,
   deletePreset,
+  exportBundle,
   fetchBootstrap,
   fetchBuildHistory,
   fetchFilePreview,
   fetchJob,
+  restoreSnapshot,
+  saveFile,
+  saveLayout,
   inspectPath,
   saveWorkspaceConfig,
+  updateCanvas,
 } from "./api";
 import PresetPanel from "./PresetPanel";
 import PreviewPane from "./PreviewPane";
 import QuickSwitcher from "./QuickSwitcher";
+import SnapshotPanel from "./SnapshotPanel";
 import { buildAdjacency, buildFileTree, searchFiles } from "./lib/vault";
 
 
@@ -312,8 +323,21 @@ export default function App() {
   const [examples, setExamples] = useState([]);
   const [presets, setPresets] = useState([]);
   const [buildHistory, setBuildHistory] = useState([]);
+  const [bookmarks, setBookmarks] = useState([]);
+  const [snapshots, setSnapshots] = useState([]);
+  const [canvases, setCanvases] = useState([]);
+  const [selectedCanvasId, setSelectedCanvasId] = useState("");
   const [jobs, setJobs] = useState([]);
   const [activeJobId, setActiveJobId] = useState("");
+  const [layout, setLayout] = useState({
+    active_tab: "vault",
+    selected_file_path: null,
+    expanded_nodes: [],
+    graph_local_depth: 0,
+    graph_source_filter: "all",
+    graph_pinned_nodes: [],
+    graph_viewport: { x: 0, y: 0, scale: 1 },
+  });
   const [config, setConfig] = useState(createEmptyConfig());
   const [preview, setPreview] = useState(null);
   const [buildResult, setBuildResult] = useState(null);
@@ -368,10 +392,16 @@ export default function App() {
           setExamples(payload.examples ?? []);
           setPresets(payload.presets ?? []);
           setBuildHistory(payload.build_history ?? []);
+          setBookmarks(payload.bookmarks ?? []);
+          setSnapshots(payload.snapshots ?? []);
+          setCanvases(payload.canvases ?? []);
+          setSelectedCanvasId((payload.canvases ?? [])[0]?.id || "");
           setJobs(payload.jobs ?? []);
           setConfig(normalizeConfig(payload.config));
+          setLayout(payload.layout ?? layout);
           setBuildResult(normalizeResult(payload.last_result));
           setPreview(normalizeResult(payload.last_result));
+          setActiveTab(payload.layout?.active_tab ?? "vault");
         });
       } catch (loadError) {
         setError(loadError.message);
@@ -399,7 +429,8 @@ export default function App() {
     if (selectedFile && fileLookup.has(selectedFile.id)) {
       return;
     }
-    setSelectedFile(files[0]);
+    const preferred = files.find((file) => file.original_path === layout.selected_file_path);
+    setSelectedFile(preferred || files[0]);
   }, [fileLookup, files, selectedFile, tree]);
 
   useEffect(() => {
@@ -468,6 +499,18 @@ export default function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      saveLayout({
+        ...layout,
+        active_tab: activeTab,
+        selected_file_path: selectedFile?.original_path || null,
+        expanded_nodes: [...expandedNodes],
+      }).catch(() => {});
+    }, 300);
+    return () => window.clearTimeout(timeout);
+  }, [activeTab, expandedNodes, layout, selectedFile]);
 
   function patchConfig(nextConfig) {
     setConfig(normalizeConfig(nextConfig));
@@ -610,10 +653,176 @@ export default function App() {
     URL.revokeObjectURL(url);
   }
 
+  async function handleExportBundle() {
+    try {
+      const payload = await exportBundle();
+      setNotice(`Bundle exported to ${payload.path}`);
+    } catch (bundleError) {
+      setError(bundleError.message);
+    }
+  }
+
+  async function handleBookmarkFile(file) {
+    if (!file) {
+      return;
+    }
+    try {
+      const bookmark = await createBookmark({
+        type: "file",
+        label: file.label,
+        path: file.original_path,
+        file_id: file.id,
+      });
+      setBookmarks((current) => [bookmark, ...current.filter((item) => item.id !== bookmark.id)]);
+      setNotice(`Bookmarked ${file.label}.`);
+    } catch (bookmarkError) {
+      setError(bookmarkError.message);
+    }
+  }
+
+  async function handleSaveFile(file, content) {
+    if (!file) {
+      return;
+    }
+    try {
+      await saveFile(file.original_path, content, config.access);
+      const payload = await fetchFilePreview(file.original_path, config.access);
+      setFilePreview(payload);
+      setNotice(`Saved ${file.label}.`);
+      setSnapshots(await fetchBootstrap().then((data) => data.snapshots ?? snapshots));
+    } catch (saveError) {
+      setError(saveError.message);
+    }
+  }
+
+  async function handleCreateNote() {
+    const directory = window.prompt("Create note in directory", config.access.allowed_roots[0] || "");
+    if (!directory) {
+      return;
+    }
+    const name = window.prompt("New note filename", "Untitled.md");
+    if (!name) {
+      return;
+    }
+    try {
+      const payload = await createFile(directory, name, `# ${name.replace(/\.md$/i, "")}\n\n`, config.access);
+      setNotice(`Created ${payload.path}`);
+      await startWorkspaceJob("preview");
+    } catch (createError) {
+      setError(createError.message);
+    }
+  }
+
+  async function handleRestoreSnapshot(snapshotId) {
+    try {
+      await restoreSnapshot(snapshotId);
+      const payload = await fetchBootstrap();
+      setSnapshots(payload.snapshots ?? []);
+      setConfig(normalizeConfig(payload.config));
+      setNotice("Snapshot restored.");
+    } catch (snapshotError) {
+      setError(snapshotError.message);
+    }
+  }
+
+  async function handleCreateCanvas() {
+    const name = window.prompt("Canvas name", "Workspace board");
+    if (!name) {
+      return;
+    }
+    try {
+      const canvas = await createCanvas({
+        name,
+        description: "Canvas board",
+        cards: [],
+        edges: [],
+      });
+      setCanvases((current) => [...current, canvas]);
+      setSelectedCanvasId(canvas.id);
+      setActiveTab("canvas");
+    } catch (canvasError) {
+      setError(canvasError.message);
+    }
+  }
+
+  async function handleSaveCanvas(canvas, cards) {
+    if (!canvas) {
+      return;
+    }
+    try {
+      const saved = await updateCanvas(canvas.id, {
+        name: canvas.name,
+        description: canvas.description || "",
+        cards,
+        edges: canvas.edges || [],
+      });
+      setCanvases((current) => current.map((item) => (item.id === saved.id ? saved : item)));
+      setNotice(`Saved canvas ${saved.name}.`);
+    } catch (canvasError) {
+      setError(canvasError.message);
+    }
+  }
+
+  async function handleAddFileCard(canvas, file) {
+    if (!canvas || !file) {
+      return;
+    }
+    const cards = [
+      ...(canvas.cards || []),
+      {
+        id: crypto.randomUUID(),
+        type: "file",
+        label: file.label,
+        path: file.original_path,
+        file_id: file.id,
+        x: 32 + (canvas.cards || []).length * 22,
+        y: 32 + (canvas.cards || []).length * 18,
+        width: 300,
+        height: 180,
+        color: "violet",
+      },
+    ];
+    await handleSaveCanvas(canvas, cards);
+  }
+
+  async function handleAddTextCard(canvas) {
+    if (!canvas) {
+      return;
+    }
+    const text = window.prompt("Card text", "New idea");
+    if (!text) {
+      return;
+    }
+    const cards = [
+      ...(canvas.cards || []),
+      {
+        id: crypto.randomUUID(),
+        type: "text",
+        label: text.split("\n")[0].slice(0, 48),
+        text,
+        x: 40 + (canvas.cards || []).length * 18,
+        y: 40 + (canvas.cards || []).length * 18,
+        width: 280,
+        height: 180,
+        color: "mint",
+      },
+    ];
+    await handleSaveCanvas(canvas, cards);
+  }
+
   function selectFile(file) {
     setSelectedFile(file);
     setQuickOpen(false);
     setActiveTab("notes");
+  }
+
+  function selectBookmark(bookmark) {
+    if (bookmark.type === "file") {
+      const match = files.find((file) => file.original_path === bookmark.path || file.id === bookmark.file_id);
+      if (match) {
+        selectFile(match);
+      }
+    }
   }
 
   return (
@@ -668,6 +877,9 @@ export default function App() {
           onDeletePreset={handleDeletePreset}
         />
 
+        <BookmarkPanel bookmarks={bookmarks} onSelectBookmark={selectBookmark} />
+        <SnapshotPanel snapshots={snapshots} onRestore={handleRestoreSnapshot} />
+
         <div className="sidebar__panel">
           <span className="eyebrow">Boundary notes</span>
           <ul className="sidebar-list">
@@ -687,6 +899,7 @@ export default function App() {
             {[
               ["vault", "Vault"],
               ["notes", "Notes"],
+              ["canvas", "Canvas"],
               ["graph", "Graph"],
             ].map(([id, label]) => (
               <button
@@ -722,6 +935,9 @@ export default function App() {
             </button>
             <button className="ghost-button" type="button" onClick={exportConfig}>
               Export JSON
+            </button>
+            <button className="ghost-button" type="button" onClick={handleExportBundle}>
+              Export bundle
             </button>
           </div>
         </section>
@@ -875,6 +1091,9 @@ export default function App() {
                 <button className="primary-button" type="button" onClick={addSource}>
                   Add source
                 </button>
+                <button className="secondary-button" type="button" onClick={handleCreateNote}>
+                  New note
+                </button>
               </div>
               {config.sources.length ? (
                 <div className="source-stack">
@@ -928,8 +1147,23 @@ export default function App() {
               onSelectLinkedFile={selectFile}
               backlinks={backlinks}
               outgoing={outgoingLinks}
+              onSaveFile={handleSaveFile}
+              onBookmarkFile={handleBookmarkFile}
             />
           </section>
+        ) : null}
+
+        {activeTab === "canvas" ? (
+          <CanvasBoard
+            canvases={canvases}
+            selectedCanvasId={selectedCanvasId}
+            onSelectCanvas={setSelectedCanvasId}
+            onCreateCanvas={handleCreateCanvas}
+            onSaveCanvas={handleSaveCanvas}
+            onAddFileCard={handleAddFileCard}
+            onAddTextCard={handleAddTextCard}
+            selectedFile={selectedFile}
+          />
         ) : null}
 
         {activeTab === "graph" ? (

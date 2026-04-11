@@ -30,6 +30,7 @@ Instead of pointing Claude or Codex at a giant parent folder, you define a tight
 - renders an Obsidian-style local graph in the UI
 - supports explorer, quick switcher, note preview, backlinks, and outgoing links
 - runs preview and build work as background jobs with persisted history
+- supports bookmarks, canvas boards, note editing, snapshots, and shareable export bundles
 - enforces allow and block rules before preview, path inspection, and build
 - persists the last workspace layout locally
 - supports both `copy` and `symlink` modes
@@ -101,6 +102,18 @@ Important:
 - this gives the app its own boundary
 - it does not revoke filesystem access that an external tool already has outside the app
 - for a true AI boundary, point Claude/Codex at the generated vault or connect them through this app only
+
+## Product Surfaces
+
+- `Vault`: source curation, access rules, preview/build orchestration
+- `Notes`: explorer, quick switcher, preview, editing, backlinks, outgoing links
+- `Canvas`: draggable board for linking important notes and files
+- `Graph`: interactive local graph for vault exploration
+- Sidebar utilities:
+  - presets
+  - bookmarks
+  - build history
+  - snapshots
 
 ## Project Layout
 

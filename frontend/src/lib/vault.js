@@ -67,13 +67,52 @@ export function buildFileTree(files) {
 
 
 export function searchFiles(files, query, limit = 30) {
-  const normalized = query.trim().toLowerCase();
+  const raw = query.trim();
+  const normalized = raw.toLowerCase();
   if (!normalized) {
     return [];
   }
 
+  const tokens = raw.split(/\s+/).filter(Boolean);
+  const filters = { source: "", ext: "", path: "", kind: "" };
+  const textTokens = [];
+
+  for (const token of tokens) {
+    const lower = token.toLowerCase();
+    if (lower.startsWith("source:")) {
+      filters.source = lower.slice("source:".length);
+      continue;
+    }
+    if (lower.startsWith("ext:")) {
+      filters.ext = lower.slice("ext:".length).replace(/^\./, "");
+      continue;
+    }
+    if (lower.startsWith("path:")) {
+      filters.path = lower.slice("path:".length);
+      continue;
+    }
+    if (lower.startsWith("kind:")) {
+      filters.kind = lower.slice("kind:".length);
+      continue;
+    }
+    textTokens.push(lower);
+  }
+
   return [...(files || [])]
     .map((file) => {
+      if (filters.source && !(file.source_name || file.source || "").toLowerCase().includes(filters.source)) {
+        return { file, score: 0 };
+      }
+      if (filters.ext && (file.extension || "").toLowerCase().replace(/^\./, "") !== filters.ext) {
+        return { file, score: 0 };
+      }
+      if (filters.path && !(file.rel_path || "").toLowerCase().includes(filters.path)) {
+        return { file, score: 0 };
+      }
+      if (filters.kind && !(file.kind || file.extension || "").toLowerCase().includes(filters.kind)) {
+        return { file, score: 0 };
+      }
+
       const haystack = [
         file.label,
         file.rel_path,
@@ -84,12 +123,15 @@ export function searchFiles(files, query, limit = 30) {
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
+      const textQuery = textTokens.join(" ").trim();
       const score =
-        (file.label || "").toLowerCase().startsWith(normalized)
+        textQuery && (file.label || "").toLowerCase().startsWith(textQuery)
           ? 6
-          : haystack.includes(normalized)
+          : textQuery && haystack.includes(textQuery)
             ? 3
-            : 0;
+            : textTokens.length === 0
+              ? 1
+              : 0;
       return { file, score };
     })
     .filter((item) => item.score > 0)

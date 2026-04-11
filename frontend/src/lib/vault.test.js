@@ -36,6 +36,17 @@ describe("vault helpers", () => {
     expect(results.map((item) => item.id)).toEqual(["2"]);
   });
 
+  it("supports operator filters in search", () => {
+    const results = searchFiles(
+      [
+        { id: "1", label: "README.md", rel_path: "README.md", source_name: "demo", extension: ".md" },
+        { id: "2", label: "schema.json", rel_path: "data/schema.json", source_name: "demo", extension: ".json" },
+      ],
+      "ext:json path:data",
+    );
+    expect(results.map((item) => item.id)).toEqual(["2"]);
+  });
+
   it("reduces a graph to a local neighborhood", () => {
     const graph = {
       nodes: [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }],

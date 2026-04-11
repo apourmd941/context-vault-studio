@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import mimetypes
 import re
+import uuid
+import zipfile
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -9,11 +11,17 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from context_vault_studio.models import (
+    BookmarkPayload,
     BuildRequest,
+    CanvasPayload,
+    FileCreateRequest,
     FilePreviewRequest,
+    FileSaveRequest,
     InspectPathRequest,
     JobRequest,
+    LayoutPayload,
     PresetPayload,
+    SnapshotRestorePayload,
     WorkspaceConfig,
 )
 from context_vault_studio.services.workspace_builder import (
@@ -29,15 +37,25 @@ from context_vault_studio.storage import (
     APP_ID,
     APP_NAME,
     REPO_ROOT,
+    add_bookmark,
     append_build_history,
+    append_snapshot,
+    delete_bookmark,
+    delete_canvas,
     delete_preset,
+    load_bookmarks,
     load_build_history,
+    load_canvases,
     load_examples,
+    load_layout,
     load_last_result,
     load_presets,
+    load_snapshots,
     load_workspace_config,
+    save_layout,
     save_last_result,
     save_workspace_config,
+    upsert_canvas,
     upsert_preset,
 )
 
@@ -78,9 +96,67 @@ def bootstrap() -> dict:
         "examples": load_examples(),
         "presets": load_presets(),
         "build_history": load_build_history(),
+        "bookmarks": load_bookmarks(),
+        "layout": load_layout(),
+        "snapshots": load_snapshots()[:20],
+        "canvases": load_canvases(),
         "jobs": list_jobs()[:8],
         "last_result": load_last_result(),
     }
+
+
+@app.get("/api/bookmarks")
+def bookmarks() -> list[dict]:
+    return load_bookmarks()
+
+
+@app.post("/api/bookmarks")
+def create_bookmark(payload: BookmarkPayload) -> dict:
+    return add_bookmark(payload.model_dump())
+
+
+@app.delete("/api/bookmarks/{bookmark_id}")
+def remove_bookmark(bookmark_id: str) -> dict:
+    delete_bookmark(bookmark_id)
+    return {"status": "ok", "id": bookmark_id}
+
+
+@app.get("/api/layout")
+def layout() -> dict:
+    return load_layout()
+
+
+@app.put("/api/layout")
+def update_layout(payload: LayoutPayload) -> dict:
+    data = payload.model_dump()
+    save_layout(data)
+    return data
+
+
+@app.get("/api/canvases")
+def canvases() -> list[dict]:
+    return load_canvases()
+
+
+@app.post("/api/canvases")
+def create_canvas(payload: CanvasPayload) -> dict:
+    return upsert_canvas(canvas_id=None, payload=payload.model_dump())
+
+
+@app.put("/api/canvases/{canvas_id}")
+def update_canvas(canvas_id: str, payload: CanvasPayload) -> dict:
+    return upsert_canvas(canvas_id=canvas_id, payload=payload.model_dump())
+
+
+@app.delete("/api/canvases/{canvas_id}")
+def remove_canvas(canvas_id: str) -> dict:
+    delete_canvas(canvas_id)
+    return {"status": "ok", "id": canvas_id}
+
+
+@app.get("/api/snapshots")
+def snapshots() -> list[dict]:
+    return load_snapshots()
 
 
 @app.get("/api/presets")
@@ -140,6 +216,13 @@ def enqueue_job(payload: JobRequest) -> dict:
 @app.put("/api/workspace-config")
 def update_workspace_config(config: WorkspaceConfig) -> dict:
     payload = config.model_dump()
+    append_snapshot(
+        {
+            "kind": "workspace_config",
+            "label": "Workspace config",
+            "content": load_workspace_config(),
+        }
+    )
     save_workspace_config(payload)
     return payload
 
@@ -231,6 +314,12 @@ def _file_kind(path: Path) -> str:
     return "binary"
 
 
+def _ensure_text_editable(path: Path) -> None:
+    kind = _file_kind(path)
+    if kind != "text":
+        raise HTTPException(status_code=400, detail="Only text files are editable through this endpoint")
+
+
 @app.post("/api/file-preview")
 def file_preview(payload: FilePreviewRequest) -> dict:
     access = _current_access_policy(payload.access.model_dump() if payload.access else None)
@@ -276,6 +365,95 @@ def file_content(path: str) -> FileResponse:
     if not resolved.exists() or not resolved.is_file():
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(resolved)
+
+
+@app.post("/api/file-save")
+def file_save(payload: FileSaveRequest) -> dict:
+    access = _current_access_policy(payload.access.model_dump() if payload.access else None)
+    resolved = Path(resolve_path_value(payload.path, base_dir=REPO_ROOT)).resolve()
+    accessible, reason = _path_allowed_for_app(resolved, access)
+    if not accessible:
+        raise HTTPException(status_code=403, detail=reason or "File is not accessible")
+    if not resolved.exists() or not resolved.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    _ensure_text_editable(resolved)
+
+    previous_content = resolved.read_text(encoding="utf-8", errors="replace")
+    append_snapshot(
+        {
+            "kind": "file",
+            "label": resolved.name,
+            "path": str(resolved),
+            "content": previous_content,
+        }
+    )
+    resolved.write_text(payload.content, encoding="utf-8")
+    return {"status": "ok", "path": str(resolved)}
+
+
+@app.post("/api/file-create")
+def file_create(payload: FileCreateRequest) -> dict:
+    access = _current_access_policy(payload.access.model_dump() if payload.access else None)
+    directory = Path(resolve_path_value(payload.directory, base_dir=REPO_ROOT)).resolve()
+    accessible, reason = _path_allowed_for_app(directory, access)
+    if not accessible:
+        raise HTTPException(status_code=403, detail=reason or "Directory is not accessible")
+    if not directory.exists() or not directory.is_dir():
+        raise HTTPException(status_code=404, detail="Directory not found")
+
+    target = (directory / payload.name).resolve()
+    target_accessible, target_reason = _path_allowed_for_app(target, access)
+    if not target_accessible:
+        raise HTTPException(status_code=403, detail=target_reason or "File path is not accessible")
+    if target.exists():
+        raise HTTPException(status_code=409, detail="File already exists")
+    target.write_text(payload.content, encoding="utf-8")
+    return {"status": "ok", "path": str(target)}
+
+
+@app.post("/api/snapshots/restore")
+def restore_snapshot(payload: SnapshotRestorePayload) -> dict:
+    snapshot = next((item for item in load_snapshots() if item["id"] == payload.snapshot_id), None)
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+
+    if snapshot["kind"] == "workspace_config":
+        data = snapshot["content"]
+        save_workspace_config(data)
+        return {"status": "ok", "kind": "workspace_config"}
+
+    if snapshot["kind"] == "file":
+        target = Path(snapshot["path"]).resolve()
+        target.write_text(snapshot.get("content", ""), encoding="utf-8")
+        return {"status": "ok", "kind": "file", "path": str(target)}
+
+    raise HTTPException(status_code=400, detail="Unsupported snapshot kind")
+
+
+@app.post("/api/export-bundle")
+def export_bundle() -> dict:
+    last_result = load_last_result()
+    if not last_result:
+        raise HTTPException(status_code=400, detail="Build a vault before exporting a bundle")
+
+    output_dir = Path(last_result["artifacts"]["output_dir"]).resolve()
+    if not output_dir.exists():
+        raise HTTPException(status_code=404, detail="Last build output directory is missing")
+
+    exports_dir = REPO_ROOT / "build" / "exports"
+    exports_dir.mkdir(parents=True, exist_ok=True)
+    zip_path = exports_dir / f"context-vault-bundle-{uuid.uuid4().hex[:8]}.zip"
+
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for file_path in output_dir.rglob("*"):
+            if file_path.is_file():
+                archive.write(file_path, arcname=file_path.relative_to(output_dir))
+
+    return {
+        "status": "ok",
+        "path": str(zip_path),
+        "size_bytes": zip_path.stat().st_size,
+    }
 
 
 @app.post("/api/path-inspect")

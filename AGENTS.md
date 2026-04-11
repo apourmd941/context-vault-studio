@@ -50,6 +50,10 @@ Build a cross-platform local app that lets people:
   - source editing
   - explorer and quick switcher
   - note preview
+  - note editing and creation
+  - bookmarks
+  - snapshots
+  - canvas boards
   - preview/build job tracking
   - graph view
   - path inspection
@@ -57,6 +61,13 @@ Build a cross-platform local app that lets people:
   - `GET /api/bootstrap`
   - `GET /api/presets`
   - `POST /api/presets`
+  - `GET /api/bookmarks`
+  - `POST /api/bookmarks`
+  - `GET /api/layout`
+  - `PUT /api/layout`
+  - `GET /api/canvases`
+  - `POST /api/canvases`
+  - `GET /api/snapshots`
   - `GET /api/build-history`
   - `GET /api/jobs`
   - `POST /api/jobs`
@@ -65,6 +76,9 @@ Build a cross-platform local app that lets people:
   - `PUT /api/workspace-config`
   - `POST /api/path-inspect`
   - `POST /api/file-preview`
+  - `POST /api/file-save`
+  - `POST /api/file-create`
+  - `POST /api/export-bundle`
   - `GET /api/file-content`
 - CLI:
   - `python3 tools/build_context_workspace.py --config ...`

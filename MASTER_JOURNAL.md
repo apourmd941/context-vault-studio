@@ -49,6 +49,13 @@ Turn the earlier Obsidian-style mapping prototype into a real shareable app with
 - added an in-app explorer, quick switcher, richer note preview, and link panels
 - added frontend utility tests and open-source project metadata
 
+## Phase 7
+
+- added editable note preview with save and create flows
+- added bookmarks, workspace layout persistence, and snapshot restore
+- added canvas boards for draggable visual organization
+- added export-bundle support for sharing built vaults
+
 ## Verification
 
 - `python3 -m py_compile` for the shared builder

@@ -1,4 +1,5 @@
 import ReactMarkdown from "react-markdown";
+import { useEffect, useState } from "react";
 
 
 function LinkList({ title, items, onSelect }) {
@@ -28,7 +29,17 @@ export default function PreviewPane({
   onSelectLinkedFile,
   backlinks,
   outgoing,
+  onSaveFile,
+  onBookmarkFile,
 }) {
+  const [draft, setDraft] = useState("");
+  const [editing, setEditing] = useState(false);
+
+  useEffect(() => {
+    setDraft(preview?.content || "");
+    setEditing(false);
+  }, [preview?.content, selectedFile?.id]);
+
   return (
     <section className="panel panel--tight">
       <div className="panel__header">
@@ -37,6 +48,18 @@ export default function PreviewPane({
           <h3>{selectedFile?.label || "Choose a file"}</h3>
           <div className="microcopy">{selectedFile?.rel_path || "Select something in the explorer or graph."}</div>
         </div>
+        {selectedFile ? (
+          <div className="hero__actions hero__actions--tight">
+            <button className="secondary-button" type="button" onClick={() => onBookmarkFile(selectedFile)}>
+              Bookmark
+            </button>
+            {preview?.kind === "text" ? (
+              <button className="ghost-button" type="button" onClick={() => setEditing((current) => !current)}>
+                {editing ? "Preview" : "Edit"}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       {!selectedFile ? (
@@ -54,7 +77,21 @@ export default function PreviewPane({
             <span>{preview.size_bytes} bytes</span>
           </div>
 
-          {preview.kind === "text" ? (
+          {preview.kind === "text" && editing ? (
+            <div className="editor-surface">
+              <textarea value={draft} rows="18" onChange={(event) => setDraft(event.target.value)} />
+              <div className="hero__actions hero__actions--tight">
+                <button className="primary-button" type="button" onClick={() => onSaveFile(selectedFile, draft)}>
+                  Save note
+                </button>
+                <button className="ghost-button" type="button" onClick={() => setDraft(preview.content || "")}>
+                  Reset
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {preview.kind === "text" && !editing ? (
             <div className="markdown-surface">
               <ReactMarkdown>{preview.content || ""}</ReactMarkdown>
             </div>

@@ -25,6 +25,34 @@ export function fetchBootstrap() {
   return request("/api/bootstrap");
 }
 
+export function fetchBookmarks() {
+  return request("/api/bookmarks");
+}
+
+export function createBookmark(payload) {
+  return request("/api/bookmarks", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteBookmark(bookmarkId) {
+  return request(`/api/bookmarks/${bookmarkId}`, {
+    method: "DELETE",
+  });
+}
+
+export function fetchLayout() {
+  return request("/api/layout");
+}
+
+export function saveLayout(payload) {
+  return request("/api/layout", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function fetchJobs() {
   return request("/api/jobs");
 }
@@ -75,6 +103,41 @@ export function fetchBuildHistory() {
   return request("/api/build-history");
 }
 
+export function fetchCanvases() {
+  return request("/api/canvases");
+}
+
+export function createCanvas(payload) {
+  return request("/api/canvases", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateCanvas(canvasId, payload) {
+  return request(`/api/canvases/${canvasId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteCanvas(canvasId) {
+  return request(`/api/canvases/${canvasId}`, {
+    method: "DELETE",
+  });
+}
+
+export function fetchSnapshots() {
+  return request("/api/snapshots");
+}
+
+export function restoreSnapshot(snapshotId) {
+  return request("/api/snapshots/restore", {
+    method: "POST",
+    body: JSON.stringify({ snapshot_id: snapshotId }),
+  });
+}
+
 export function previewWorkspace(config, clean = true) {
   return request("/api/preview", {
     method: "POST",
@@ -100,5 +163,25 @@ export function fetchFilePreview(path, access) {
   return request("/api/file-preview", {
     method: "POST",
     body: JSON.stringify({ path, access }),
+  });
+}
+
+export function saveFile(path, content, access) {
+  return request("/api/file-save", {
+    method: "POST",
+    body: JSON.stringify({ path, content, access }),
+  });
+}
+
+export function createFile(directory, name, content, access) {
+  return request("/api/file-create", {
+    method: "POST",
+    body: JSON.stringify({ directory, name, content, access }),
+  });
+}
+
+export function exportBundle() {
+  return request("/api/export-bundle", {
+    method: "POST",
   });
 }

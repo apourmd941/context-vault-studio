@@ -316,6 +316,11 @@ code,
   min-width: 260px;
 }
 
+.hero__actions--tight {
+  min-width: 0;
+  justify-content: flex-start;
+}
+
 .primary-button,
 .secondary-button,
 .ghost-button {
@@ -657,6 +662,16 @@ select:focus {
   gap: 18px;
 }
 
+.editor-surface {
+  display: grid;
+  gap: 12px;
+}
+
+.editor-surface textarea {
+  min-height: 360px;
+  font-family: var(--font-mono);
+}
+
 .preview-meta {
   display: flex;
   flex-wrap: wrap;
@@ -908,6 +923,94 @@ select:focus {
 .graph-summary {
   color: var(--muted);
   line-height: 1.65;
+}
+
+.canvas-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.canvas-tab {
+  padding: 8px 12px;
+  border: 1px solid rgba(155, 140, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(19, 22, 30, 0.82);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.canvas-tab--active {
+  background: rgba(155, 140, 255, 0.18);
+  color: var(--ink);
+}
+
+.canvas-board {
+  position: relative;
+  min-height: 74vh;
+  overflow: hidden;
+  border: 1px solid rgba(155, 140, 255, 0.16);
+  border-radius: var(--radius-xl);
+  background:
+    radial-gradient(circle at top left, rgba(124, 230, 211, 0.08), transparent 28%),
+    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    rgba(10, 13, 19, 0.9);
+  background-size: auto, 36px 36px, 36px 36px, auto;
+}
+
+.canvas-card {
+  position: absolute;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-lg);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow);
+}
+
+.canvas-card h4,
+.canvas-empty h3 {
+  margin: 0;
+}
+
+.canvas-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.canvas-card__handle {
+  justify-self: start;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(12, 15, 22, 0.62);
+  color: var(--ink);
+  cursor: grab;
+}
+
+.canvas-empty {
+  display: grid;
+  place-items: center;
+  min-height: 74vh;
+  color: var(--muted);
+  text-align: center;
+}
+
+.link-chip:hover,
+.canvas-tab:hover,
+.canvas-card__handle:hover {
+  transform: translateY(-1px);
+}
+
+.link-chip,
+.canvas-tab,
+.canvas-card__handle {
+  transition: transform 140ms ease, background 140ms ease;
 }
 
 @media (max-width: 1100px) {
