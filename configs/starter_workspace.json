@@ -1,0 +1,32 @@
+{
+  "vault_name": "Context Vault Studio",
+  "output_dir": "../build/context-vault-studio",
+  "default_mode": "copy",
+  "max_file_size_bytes": 5000000,
+  "default_exclude": [
+    ".DS_Store",
+    ".git/**",
+    ".idea/**",
+    ".next/**",
+    ".pytest_cache/**",
+    ".ruff_cache/**",
+    ".venv/**",
+    ".vscode/**",
+    "__pycache__/**",
+    "build/**",
+    "coverage/**",
+    "dist/**",
+    "node_modules/**",
+    "*.pyc",
+    "*.pyo",
+    "*.tsbuildinfo"
+  ],
+  "default_include": [],
+  "access": {
+    "allowed_roots": [],
+    "blocked_paths": [],
+    "blocked_patterns": [],
+    "enforce_copy_mode": true
+  },
+  "sources": []
+}

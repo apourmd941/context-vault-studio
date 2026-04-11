@@ -1,0 +1,78 @@
+{
+  "vault_name": "Aidin Curated Context Vault",
+  "output_dir": "../build/aidin-curated-vault",
+  "default_mode": "copy",
+  "max_file_size_bytes": 5000000,
+  "default_exclude": [
+    ".DS_Store",
+    ".git/**",
+    ".idea/**",
+    ".next/**",
+    ".pytest_cache/**",
+    ".ruff_cache/**",
+    ".venv/**",
+    ".vscode/**",
+    "__pycache__/**",
+    "build/**",
+    "coverage/**",
+    "dist/**",
+    "node_modules/**",
+    "*.pyc",
+    "*.pyo",
+    "*.tsbuildinfo"
+  ],
+  "access": {
+    "allowed_roots": [
+      "/Users/aidin/NeutronDev/neutron5",
+      "/Users/aidin/NeutronDev/NLCS",
+      "/Users/aidin/NeutronDev/neutron-hub",
+      "/Users/aidin/NeutronDev/stage b5 manual"
+    ],
+    "blocked_paths": [],
+    "blocked_patterns": [],
+    "enforce_copy_mode": true
+  },
+  "sources": [
+    {
+      "name": "neutron5-core-docs",
+      "category": "Projects",
+      "path": "/Users/aidin/NeutronDev/neutron5",
+      "include": [
+        "README.md",
+        "AGENTS.md",
+        "MASTER_JOURNAL.md",
+        "*.md"
+      ]
+    },
+    {
+      "name": "NLCS-docs",
+      "category": "Projects",
+      "path": "/Users/aidin/NeutronDev/NLCS",
+      "include": [
+        "README.md",
+        "AGENTS.md",
+        "MASTER_JOURNAL.md",
+        "*.md"
+      ]
+    },
+    {
+      "name": "neutron-hub-planning",
+      "category": "Projects",
+      "path": "/Users/aidin/NeutronDev/neutron-hub",
+      "include": [
+        "README.md",
+        "AGENTS.md",
+        "*.md"
+      ]
+    },
+    {
+      "name": "stage-b5-manual",
+      "category": "Manuals",
+      "path": "/Users/aidin/NeutronDev/stage b5 manual",
+      "include": [
+        "*.md",
+        "*.pdf"
+      ]
+    }
+  ]
+}
