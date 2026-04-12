@@ -512,3 +512,46 @@ def test_apply_preview_creates_scratch_run_and_reconciliation(tmp_path: Path, mo
     detail_json = detail.json()
     assert detail_json["contents"]["apply_summary"]["changed_file_count"] >= 1
     assert detail_json["contents"]["reconciliation_report"]["after_snapshot_id"]
+
+
+def test_parallel_scan_profile_returns_worker_summary(tmp_path: Path, monkeypatch) -> None:
+    source_dir = tmp_path / "docs"
+    source_dir.mkdir()
+    (source_dir / "README.md").write_text("# Demo Vault\n\nA top note.\n", encoding="utf-8")
+    (source_dir / "notes.txt").write_text("hello\n", encoding="utf-8")
+
+    client = make_client(tmp_path, monkeypatch)
+    response = client.post(
+        "/api/parallel-scan/profile",
+        json={
+            "config": {
+                "vault_name": "Parallel Profile",
+                "output_dir": str(tmp_path / "output"),
+                "default_mode": "copy",
+                "max_file_size_bytes": 5000000,
+                "default_exclude": [],
+                "default_include": [],
+                "access": {
+                    "allowed_roots": [str(source_dir)],
+                    "blocked_paths": [],
+                    "blocked_patterns": [],
+                    "enforce_copy_mode": True,
+                },
+                "sources": [
+                    {
+                        "name": "demo-docs",
+                        "category": "Docs",
+                        "path": str(source_dir),
+                        "include": ["*.*"],
+                        "exclude": [],
+                    }
+                ],
+            },
+            "max_workers": 2,
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["record"]["worker_count"] == 2
+    assert payload["profile"]["summary"]["file_count"] == 2
+    assert payload["profile"]["top_extensions"]

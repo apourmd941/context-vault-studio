@@ -155,6 +155,11 @@ class BuildTaskRequest(BaseModel):
     metadata: dict = Field(default_factory=dict)
 
 
+class ParallelScanRequest(BaseModel):
+    config: WorkspaceConfig
+    max_workers: int = Field(default=4, ge=1, le=16)
+
+
 class AdapterCapabilities(BaseModel):
     adapter_id: str = Field(..., min_length=1)
     label: str = Field(..., min_length=1)

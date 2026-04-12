@@ -152,6 +152,16 @@ Turn the earlier Obsidian-style mapping prototype into a real shareable app with
   - scratch apply directory
 - after scratch apply, the app rescans the scratch workspace and records before/after notes as the first reconciliation loop
 
+## Phase 16
+
+- added the first parallel scan foundation in Python
+- introduced:
+  - source discovery with a thread pool
+  - per-file profiling with a process pool
+  - merged extension/size summaries
+  - persisted parallel scan profile artifacts
+- exposed a profiling endpoint so the parallel engine can be exercised and measured inside the app backend
+
 ## Verification
 
 - `python3 -m py_compile` for the shared builder

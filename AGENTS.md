@@ -85,6 +85,7 @@ Build a cross-platform local app that lets people:
   - `GET /api/build-adapters/apply-runs`
   - `GET /api/build-adapters/apply-runs/{run_id}`
   - `POST /api/build-adapters/apply-preview/{preview_id}`
+  - `POST /api/parallel-scan/profile`
   - `GET /api/build-history`
   - `GET /api/jobs`
   - `POST /api/jobs`

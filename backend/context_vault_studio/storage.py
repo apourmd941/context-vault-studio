@@ -28,6 +28,8 @@ BUILD_PATCH_PREVIEWS_PATH = STATE_DIR / "build_patch_previews.json"
 BUILD_PATCH_PREVIEWS_DIR = STATE_DIR / "build_patch_previews"
 BUILD_APPLY_RUNS_PATH = STATE_DIR / "build_apply_runs.json"
 BUILD_APPLY_RUNS_DIR = STATE_DIR / "build_apply_runs"
+PARALLEL_SCAN_PROFILES_PATH = STATE_DIR / "parallel_scan_profiles.json"
+PARALLEL_SCAN_PROFILES_DIR = STATE_DIR / "parallel_scan_profiles"
 STARTER_CONFIG_PATH = REPO_ROOT / "configs" / "starter_workspace.json"
 GUIDED_DEMO_CONFIG_PATH = REPO_ROOT / "configs" / "guided_demo.json"
 LOCAL_NEUTRON_EXAMPLE_PATH = REPO_ROOT / "config" / "neutron_curated.example.json"
@@ -407,6 +409,43 @@ def load_build_apply_run(run_id: str) -> dict | None:
         "apply_summary": _read_json(Path(artifacts["apply_summary_file"])),
     }
     return payload
+
+
+def load_parallel_scan_profiles() -> list[dict]:
+    payload = _read_json(PARALLEL_SCAN_PROFILES_PATH)
+    return payload if isinstance(payload, list) else []
+
+
+def save_parallel_scan_profile(payload: dict) -> dict:
+    ensure_state_dir()
+    PARALLEL_SCAN_PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+
+    profile_id = payload.get("id") or str(uuid.uuid4())
+    created_at = payload.get("created_at") or _now_iso()
+    profile_dir = PARALLEL_SCAN_PROFILES_DIR / profile_id
+    profile_dir.mkdir(parents=True, exist_ok=True)
+
+    artifact_file = profile_dir / "parallel_scan_profile.json"
+    artifact_file.write_text(json.dumps(payload.get("profile", {}), indent=2) + "\n", encoding="utf-8")
+
+    record = {
+        "id": profile_id,
+        "created_at": created_at,
+        "label": payload.get("label") or "Parallel scan profile",
+        "profile_dir": str(profile_dir),
+        "artifacts": {"profile_file": str(artifact_file)},
+        "source_count": int(payload.get("source_count", 0)),
+        "file_count": int(payload.get("file_count", 0)),
+        "worker_count": int(payload.get("worker_count", 0)),
+    }
+
+    current = load_parallel_scan_profiles()
+    next_records = [record]
+    for item in current:
+        if item.get("id") != profile_id:
+            next_records.append(item)
+    _write_json(PARALLEL_SCAN_PROFILES_PATH, next_records[:120])
+    return record
 
 
 def load_bookmarks() -> list[dict]:

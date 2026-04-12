@@ -21,6 +21,7 @@ from context_vault_studio.models import (
     InspectPathRequest,
     JobRequest,
     LayoutPayload,
+    ParallelScanRequest,
     PresetPayload,
     SnapshotRestorePayload,
     WorkspaceConfig,
@@ -33,6 +34,7 @@ from context_vault_studio.services.build_adapters import (
 )
 from context_vault_studio.services.build_apply import apply_build_patch_preview
 from context_vault_studio.services.build_patch_gate import create_build_patch_preview
+from context_vault_studio.services.parallel_scan import build_parallel_scan_profile
 from context_vault_studio.services.workspace_builder import (
     build_workspace_from_config,
     evaluate_path_access,
@@ -71,6 +73,7 @@ from context_vault_studio.storage import (
     save_layout,
     save_last_result,
     save_workspace_config,
+    load_parallel_scan_profiles,
     upsert_canvas,
     upsert_preset,
 )
@@ -118,6 +121,7 @@ def bootstrap() -> dict:
         "snapshot_bundles": load_snapshot_bundles()[:20],
         "build_patch_previews": load_build_patch_previews()[:20],
         "build_apply_runs": load_build_apply_runs()[:20],
+        "parallel_scan_profiles": load_parallel_scan_profiles()[:20],
         "build_adapter_capabilities": list_build_adapter_capabilities(),
         "canvases": load_canvases(),
         "jobs": list_jobs()[:8],
@@ -277,6 +281,18 @@ def build_apply_preview(preview_id: str) -> dict:
     if not preview:
         raise HTTPException(status_code=404, detail="Build patch preview not found")
     return apply_build_patch_preview(preview)
+
+
+@app.post("/api/parallel-scan/profile")
+def parallel_scan_profile(payload: ParallelScanRequest) -> dict:
+    try:
+        return build_parallel_scan_profile(
+            payload.config.model_dump(),
+            base_dir=REPO_ROOT,
+            max_workers=payload.max_workers,
+        )
+    except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/presets")
