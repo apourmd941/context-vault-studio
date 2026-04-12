@@ -24,6 +24,8 @@ SNAPSHOTS_PATH = STATE_DIR / "snapshots.json"
 CANVASES_PATH = STATE_DIR / "canvases.json"
 SNAPSHOT_BUNDLES_PATH = STATE_DIR / "snapshot_bundles.json"
 SNAPSHOT_BUNDLES_DIR = STATE_DIR / "snapshot_bundles"
+BUILD_PATCH_PREVIEWS_PATH = STATE_DIR / "build_patch_previews.json"
+BUILD_PATCH_PREVIEWS_DIR = STATE_DIR / "build_patch_previews"
 STARTER_CONFIG_PATH = REPO_ROOT / "configs" / "starter_workspace.json"
 GUIDED_DEMO_CONFIG_PATH = REPO_ROOT / "configs" / "guided_demo.json"
 LOCAL_NEUTRON_EXAMPLE_PATH = REPO_ROOT / "config" / "neutron_curated.example.json"
@@ -281,6 +283,67 @@ def attach_snapshot_bundle(result: dict) -> dict | None:
     record = save_snapshot_bundle(payload)
     result["snapshot_bundle"] = record
     return record
+
+
+def load_build_patch_previews() -> list[dict]:
+    payload = _read_json(BUILD_PATCH_PREVIEWS_PATH)
+    return payload if isinstance(payload, list) else []
+
+
+def save_build_patch_preview(payload: dict) -> dict:
+    ensure_state_dir()
+    BUILD_PATCH_PREVIEWS_DIR.mkdir(parents=True, exist_ok=True)
+
+    preview_id = payload.get("id") or str(uuid.uuid4())
+    created_at = payload.get("created_at") or _now_iso()
+    preview_dir = BUILD_PATCH_PREVIEWS_DIR / preview_id
+    preview_dir.mkdir(parents=True, exist_ok=True)
+
+    artifact_paths = {
+        "task_packet_file": preview_dir / "task_packet.json",
+        "normalized_result_file": preview_dir / "normalized_result.json",
+        "patch_bundle_file": preview_dir / "patch_bundle.json",
+        "validation_report_file": preview_dir / "validation_report.json",
+    }
+
+    for key, path in artifact_paths.items():
+        source_key = key.replace("_file", "")
+        path.write_text(json.dumps(payload.get(source_key, {}), indent=2) + "\n", encoding="utf-8")
+
+    record = {
+        "id": preview_id,
+        "created_at": created_at,
+        "label": payload.get("label") or "Build patch preview",
+        "bundle_dir": str(preview_dir),
+        "artifacts": {key: str(value) for key, value in artifact_paths.items()},
+        "ready_to_apply": bool(payload.get("ready_to_apply", False)),
+        "warning_count": int(payload.get("warning_count", 0)),
+        "error_count": int(payload.get("error_count", 0)),
+        "copied_file_count": int(payload.get("copied_file_count", 0)),
+    }
+
+    current = load_build_patch_previews()
+    next_records = [record]
+    for item in current:
+        if item.get("id") != preview_id:
+            next_records.append(item)
+    _write_json(BUILD_PATCH_PREVIEWS_PATH, next_records[:120])
+    return record
+
+
+def load_build_patch_preview(preview_id: str) -> dict | None:
+    record = next((item for item in load_build_patch_previews() if item.get("id") == preview_id), None)
+    if not record:
+        return None
+    artifacts = record.get("artifacts", {})
+    payload = deepcopy(record)
+    payload["contents"] = {
+        "task_packet": _read_json(Path(artifacts["task_packet_file"])),
+        "normalized_result": _read_json(Path(artifacts["normalized_result_file"])),
+        "patch_bundle": _read_json(Path(artifacts["patch_bundle_file"])),
+        "validation_report": _read_json(Path(artifacts["validation_report_file"])),
+    }
+    return payload
 
 
 def load_bookmarks() -> list[dict]:

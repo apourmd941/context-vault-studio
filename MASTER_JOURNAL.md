@@ -131,6 +131,16 @@ Turn the earlier Obsidian-style mapping prototype into a real shareable app with
   - a deterministic manifest artifact
 - this gives the repo its first token-free governed Build flow based only on snapshot scope, policy, and selected pieces
 
+## Phase 14
+
+- added a scratch patch-preview gate for Build
+- deterministic or future adapter results can now be materialized into:
+  - a task packet artifact
+  - a normalized result artifact
+  - a patch bundle artifact
+  - a validation report artifact
+- the gate validates file actions against selected scope, allowed targets, and forbidden paths before anything is considered apply-ready
+
 ## Verification
 
 - `python3 -m py_compile` for the shared builder

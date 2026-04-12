@@ -33,6 +33,7 @@ Instead of pointing Claude or Codex at a giant parent folder, you define a tight
 - can now assemble governed task packets from snapshot bundles, policy bundles, and selected SLCS pieces
 - can now run those task packets through a common adapter runner, even before the adapters are fully configured
 - includes a real deterministic no-model Build path that can generate a scoped plan, file actions, and manifest output without token use
+- can now materialize deterministic Build results into a scratch patch-preview bundle with validation artifacts
 - supports explorer, quick switcher, note preview, backlinks, and outgoing links
 - runs preview and build work as background jobs with persisted history
 - supports bookmarks, canvas boards, note editing, snapshots, and shareable export bundles

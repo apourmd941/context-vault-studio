@@ -31,6 +31,7 @@ from context_vault_studio.services.build_adapters import (
     list_build_adapter_capabilities,
     run_build_adapter,
 )
+from context_vault_studio.services.build_patch_gate import create_build_patch_preview
 from context_vault_studio.services.workspace_builder import (
     build_workspace_from_config,
     evaluate_path_access,
@@ -62,6 +63,8 @@ from context_vault_studio.storage import (
     load_snapshot_bundles,
     load_snapshots,
     load_workspace_config,
+    load_build_patch_preview,
+    load_build_patch_previews,
     save_layout,
     save_last_result,
     save_workspace_config,
@@ -110,6 +113,7 @@ def bootstrap() -> dict:
         "layout": load_layout(),
         "snapshots": load_snapshots()[:20],
         "snapshot_bundles": load_snapshot_bundles()[:20],
+        "build_patch_previews": load_build_patch_previews()[:20],
         "build_adapter_capabilities": list_build_adapter_capabilities(),
         "canvases": load_canvases(),
         "jobs": list_jobs()[:8],
@@ -219,6 +223,35 @@ def build_adapter_run(payload: BuildTaskRequest) -> dict:
         return run_build_adapter(payload, bundle)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/build-adapters/patch-previews")
+def build_patch_previews() -> list[dict]:
+    return load_build_patch_previews()
+
+
+@app.get("/api/build-adapters/patch-previews/{preview_id}")
+def build_patch_preview(preview_id: str) -> dict:
+    payload = load_build_patch_preview(preview_id)
+    if not payload:
+        raise HTTPException(status_code=404, detail="Build patch preview not found")
+    return payload
+
+
+@app.post("/api/build-adapters/patch-gate")
+def build_adapter_patch_gate(payload: BuildTaskRequest) -> dict:
+    bundle_id = payload.snapshot_bundle_id
+    bundle = load_snapshot_bundle(bundle_id) if bundle_id else None
+    if not bundle:
+        bundles = load_snapshot_bundles()
+        bundle = load_snapshot_bundle(bundles[0]["id"]) if bundles else None
+    if not bundle:
+        raise HTTPException(status_code=400, detail="Create a preview or build snapshot bundle before generating a patch preview")
+    try:
+        adapter_run = run_build_adapter(payload, bundle)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return create_build_patch_preview(bundle, adapter_run)
 
 
 @app.get("/api/presets")

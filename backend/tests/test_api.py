@@ -384,3 +384,65 @@ def test_deterministic_adapter_generates_manifest_and_actions(tmp_path: Path, mo
     assert normalized["file_actions"]
     assert normalized["artifacts"]["deterministic_manifest"]["entries"]
     assert normalized["plan"]["selected_piece_count"] == 2
+
+
+def test_patch_gate_creates_preview_and_validation_artifacts(tmp_path: Path, monkeypatch) -> None:
+    source_dir = tmp_path / "docs"
+    source_dir.mkdir()
+    readme = source_dir / "README.md"
+    readme.write_text("# Demo Vault\n\nA top note.\n", encoding="utf-8")
+
+    client = make_client(tmp_path, monkeypatch)
+    preview = client.post(
+        "/api/preview",
+        json={
+            "config": {
+                "vault_name": "Demo Vault",
+                "output_dir": str(tmp_path / "output"),
+                "default_mode": "copy",
+                "max_file_size_bytes": 5000000,
+                "default_exclude": [],
+                "default_include": [],
+                "access": {
+                    "allowed_roots": [str(source_dir)],
+                    "blocked_paths": [],
+                    "blocked_patterns": [],
+                    "enforce_copy_mode": True,
+                },
+                "sources": [
+                    {
+                        "name": "demo-docs",
+                        "category": "Docs",
+                        "path": str(source_dir),
+                        "include": ["*.md"],
+                        "exclude": [],
+                    }
+                ],
+            },
+            "clean": True,
+        },
+    )
+    assert preview.status_code == 200
+    bundle_id = preview.json()["snapshot_bundle"]["id"]
+
+    patch_gate = client.post(
+        "/api/build-adapters/patch-gate",
+        json={
+            "goal": "Create a deterministic docs cleanup plan",
+            "snapshot_bundle_id": bundle_id,
+            "adapter_id": "deterministic",
+            "selected_slcs_pieces": ["docs_cleanup_piece"],
+            "selected_files": ["README.md"],
+        },
+    )
+    assert patch_gate.status_code == 200
+    payload = patch_gate.json()
+    assert Path(payload["artifacts"]["patch_bundle_file"]).exists()
+    assert Path(payload["artifacts"]["validation_report_file"]).exists()
+    assert payload["copied_file_count"] == 1
+
+    detail = client.get(f"/api/build-adapters/patch-previews/{payload['id']}")
+    assert detail.status_code == 200
+    detail_json = detail.json()
+    assert detail_json["contents"]["patch_bundle"]["file_actions"]
+    assert detail_json["contents"]["validation_report"]["status"] in {"pass", "warning", "fail"}
