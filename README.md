@@ -40,6 +40,7 @@ Instead of pointing Claude or Codex at a giant parent folder, you define a tight
 - includes a polling-based live monitor with debounced change batches for scoped sources
 - now exposes a persisted Logic profile with import, symbol, route, and storage-touch signals built in parallel
 - can now generate explain bundles from snapshot + logic context and pass them into governed Build task packets
+- now exposes a unified history timeline plus direct comparison between snapshot bundles
 - supports explorer, quick switcher, note preview, backlinks, and outgoing links
 - runs preview and build work as background jobs with persisted history
 - supports bookmarks, canvas boards, note editing, snapshots, and shareable export bundles

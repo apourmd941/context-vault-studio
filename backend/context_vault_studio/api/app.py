@@ -26,6 +26,7 @@ from context_vault_studio.models import (
     LiveMonitorRequest,
     LogicProfileRequest,
     ParallelScanRequest,
+    HistoryCompareRequest,
     PresetPayload,
     SnapshotRestorePayload,
     WorkspaceConfig,
@@ -48,6 +49,10 @@ from context_vault_studio.services.live_monitor import (
     start_live_monitor,
 )
 from context_vault_studio.services.semantic_linking import build_logic_profile
+from context_vault_studio.services.history_timeline import (
+    build_history_timeline,
+    compare_snapshot_bundles,
+)
 from context_vault_studio.services.workspace_builder import (
     build_workspace_from_config,
     evaluate_path_access,
@@ -247,6 +252,27 @@ def create_explain_bundle(payload: ExplainBundleRequest) -> dict:
         raise HTTPException(status_code=404, detail="Snapshot bundle not found")
     logic_profile = load_logic_profile(payload.logic_profile_id) if payload.logic_profile_id else None
     return build_explain_bundle(snapshot, logic_profile)
+
+
+@app.get("/api/history/timeline")
+def history_timeline() -> list[dict]:
+    return build_history_timeline(
+        snapshot_bundles=load_snapshot_bundles(),
+        delta_snapshots=load_delta_snapshots(),
+        patch_previews=load_build_patch_previews(),
+        apply_runs=load_build_apply_runs(),
+        logic_profiles=load_logic_profiles(),
+        explain_bundles=load_explain_bundles(),
+    )
+
+
+@app.post("/api/history/compare")
+def history_compare(payload: HistoryCompareRequest) -> dict:
+    left = load_snapshot_bundle(payload.left_snapshot_bundle_id)
+    right = load_snapshot_bundle(payload.right_snapshot_bundle_id)
+    if not left or not right:
+        raise HTTPException(status_code=404, detail="Snapshot bundle not found for comparison")
+    return compare_snapshot_bundles(left, right)
 
 
 @app.post("/api/build-adapters/task-packet")

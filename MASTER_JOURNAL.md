@@ -200,6 +200,17 @@ Turn the earlier Obsidian-style mapping prototype into a real shareable app with
   - logic summary
 - Build task packets can now carry an explain bundle reference and explain summary metadata
 
+## Phase 21
+
+- added a unified history timeline across:
+  - snapshot bundles
+  - delta snapshots
+  - patch previews
+  - apply runs
+  - logic profiles
+  - explain bundles
+- added direct snapshot-bundle comparison so changes can be inspected without manually diffing artifacts on disk
+
 ## Verification
 
 - `python3 -m py_compile` for the shared builder

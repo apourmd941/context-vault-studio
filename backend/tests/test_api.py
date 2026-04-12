@@ -832,3 +832,94 @@ def test_explain_bundle_feeds_into_build_task_packet(tmp_path: Path, monkeypatch
     packet_json = packet.json()
     assert packet_json["metadata"]["explain_bundle_id"] == explain_bundle_id
     assert packet_json["metadata"]["explain_summary"]["top_file_count"] >= 1
+
+
+def test_history_timeline_and_compare(tmp_path: Path, monkeypatch) -> None:
+    source_dir = tmp_path / "docs"
+    source_dir.mkdir()
+    note = source_dir / "README.md"
+    note.write_text("# One\n", encoding="utf-8")
+
+    client = make_client(tmp_path, monkeypatch)
+    first = client.post(
+        "/api/preview",
+        json={
+            "config": {
+                "vault_name": "History Vault",
+                "output_dir": str(tmp_path / "output"),
+                "default_mode": "copy",
+                "max_file_size_bytes": 5000000,
+                "default_exclude": [],
+                "default_include": [],
+                "access": {
+                    "allowed_roots": [str(source_dir)],
+                    "blocked_paths": [],
+                    "blocked_patterns": [],
+                    "enforce_copy_mode": True,
+                },
+                "sources": [
+                    {
+                        "name": "docs",
+                        "category": "Docs",
+                        "path": str(source_dir),
+                        "include": ["*.md"],
+                        "exclude": [],
+                    }
+                ],
+            },
+            "clean": True,
+        },
+    )
+    assert first.status_code == 200
+    first_bundle_id = first.json()["snapshot_bundle"]["id"]
+
+    note.write_text("# Two\nChanged\n", encoding="utf-8")
+    second = client.post(
+        "/api/preview",
+        json={
+            "config": {
+                "vault_name": "History Vault",
+                "output_dir": str(tmp_path / "output"),
+                "default_mode": "copy",
+                "max_file_size_bytes": 5000000,
+                "default_exclude": [],
+                "default_include": [],
+                "access": {
+                    "allowed_roots": [str(source_dir)],
+                    "blocked_paths": [],
+                    "blocked_patterns": [],
+                    "enforce_copy_mode": True,
+                },
+                "sources": [
+                    {
+                        "name": "docs",
+                        "category": "Docs",
+                        "path": str(source_dir),
+                        "include": ["*.md"],
+                        "exclude": [],
+                    }
+                ],
+            },
+            "clean": True,
+        },
+    )
+    assert second.status_code == 200
+    second_bundle_id = second.json()["snapshot_bundle"]["id"]
+
+    timeline = client.get("/api/history/timeline")
+    assert timeline.status_code == 200
+    timeline_json = timeline.json()
+    kinds = {item["kind"] for item in timeline_json}
+    assert "snapshot_bundle" in kinds
+
+    compare = client.post(
+        "/api/history/compare",
+        json={
+            "left_snapshot_bundle_id": first_bundle_id,
+            "right_snapshot_bundle_id": second_bundle_id,
+        },
+    )
+    assert compare.status_code == 200
+    compare_json = compare.json()
+    assert compare_json["summary"]["changed_count"] == 1
+    assert "README.md" in compare_json["changed_files"]

@@ -181,6 +181,11 @@ class ExplainBundleRequest(BaseModel):
     logic_profile_id: str | None = None
 
 
+class HistoryCompareRequest(BaseModel):
+    left_snapshot_bundle_id: str = Field(..., min_length=1)
+    right_snapshot_bundle_id: str = Field(..., min_length=1)
+
+
 class AdapterCapabilities(BaseModel):
     adapter_id: str = Field(..., min_length=1)
     label: str = Field(..., min_length=1)

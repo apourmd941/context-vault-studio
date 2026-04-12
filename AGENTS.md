@@ -95,6 +95,8 @@ Build a cross-platform local app that lets people:
   - `GET /api/explain/bundles`
   - `GET /api/explain/bundles/{bundle_id}`
   - `POST /api/explain/bundles`
+  - `GET /api/history/timeline`
+  - `POST /api/history/compare`
   - `GET /api/build-history`
   - `GET /api/jobs`
   - `POST /api/jobs`
