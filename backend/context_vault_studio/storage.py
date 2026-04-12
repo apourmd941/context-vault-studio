@@ -23,6 +23,7 @@ LAYOUT_PATH = STATE_DIR / "layout.json"
 SNAPSHOTS_PATH = STATE_DIR / "snapshots.json"
 CANVASES_PATH = STATE_DIR / "canvases.json"
 STARTER_CONFIG_PATH = REPO_ROOT / "configs" / "starter_workspace.json"
+GUIDED_DEMO_CONFIG_PATH = REPO_ROOT / "configs" / "guided_demo.json"
 LOCAL_NEUTRON_EXAMPLE_PATH = REPO_ROOT / "config" / "neutron_curated.example.json"
 
 
@@ -62,6 +63,17 @@ def _normalize_config(config: dict, *, base_dir: Path) -> dict:
 
 def load_examples() -> list[dict]:
     examples: list[dict] = []
+
+    guided_demo = _read_json(GUIDED_DEMO_CONFIG_PATH)
+    if isinstance(guided_demo, dict):
+        examples.append(
+            {
+                "id": "guided-demo",
+                "label": "Guided Demo",
+                "description": "A small bundled workspace that previews and builds successfully out of the box.",
+                "config": _normalize_config(guided_demo, base_dir=GUIDED_DEMO_CONFIG_PATH.parent),
+            }
+        )
 
     starter = _read_json(STARTER_CONFIG_PATH)
     if isinstance(starter, dict):

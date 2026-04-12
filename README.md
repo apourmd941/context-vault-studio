@@ -35,6 +35,40 @@ Instead of pointing Claude or Codex at a giant parent folder, you define a tight
 - persists the last workspace layout locally
 - supports both `copy` and `symlink` modes
 
+## Current UI Flow
+
+The app now opens with a simpler `Vault` home first.
+
+- `Vault`
+  - basic mode by default
+  - load a guided demo, add a source, preview, or build
+  - advanced mode reveals the full source and boundary editor
+- `Notes`
+  - browse matched files
+  - follow backlinks and outgoing links
+  - edit files and bookmark them
+- `Canvas`
+  - arrange note and text cards on a board
+- `Graph`
+  - inspect the current local graph and jump back into notes
+
+The first recommended run is:
+
+1. start the app
+2. click `Load guided demo`
+3. let preview populate the workspace
+4. move into `Graph` or `Notes`
+5. build the vault when you want the generated output on disk
+
+## Guided Demo
+
+This repo now includes a bundled guided demo that works without any Aidin-only paths.
+
+- config: `configs/guided_demo.json`
+- sample content: `demo/sample_workspace`
+
+The guided demo is intentionally tiny so the first preview is immediate and the graph is easy to read.
+
 ## Run It
 
 macOS or Linux:
@@ -122,6 +156,7 @@ Important:
 - `scripts/runtime_manager.py`: registry-aware startup orchestration
 - `config/`: local example configs
 - `configs/`: portable starter configs
+- `demo/`: bundled sample workspace for the guided demo
 - `tools/`: CLI entrypoints
 
 ## Verification

@@ -56,6 +56,15 @@ Turn the earlier Obsidian-style mapping prototype into a real shareable app with
 - added canvas boards for draggable visual organization
 - added export-bundle support for sharing built vaults
 
+## Phase 8
+
+- simplified the tab experience so `Vault`, `Notes`, `Canvas`, and `Graph` feel like different rooms instead of the same dashboard
+- added a basic-first `Vault` home with a graph spotlight, essential actions, and clearer empty states
+- moved the heavy source and boundary forms behind `Advanced mode`
+- reduced sidebar noise by hiding empty bookmark, snapshot, job, and build-history panels
+- added a bundled guided demo that previews and builds successfully out of the box
+- verified the guided demo through the CLI dry-run path so the first-run experience is deterministic
+
 ## Verification
 
 - `python3 -m py_compile` for the shared builder

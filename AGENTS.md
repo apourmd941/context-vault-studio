@@ -47,7 +47,9 @@ Build a cross-platform local app that lets people:
 ## Runtime Surfaces
 
 - Web UI:
-  - source editing
+  - basic-first vault home
+  - advanced source editing
+  - guided demo loading
   - explorer and quick switcher
   - note preview
   - note editing and creation
@@ -100,5 +102,7 @@ Build a cross-platform local app that lets people:
 ## Operator Notes
 
 - The UI is intentionally Obsidian-inspired, not a literal clone.
+- The bundled guided demo should remain portable and must not depend on Aidin-only absolute paths.
+- Keep the first-run flow simple: the operator should be able to load the demo, preview, and reach Notes or Graph without editing low-level settings first.
 - Keep the app shareable: avoid hard-wiring it to Aidin-only paths except in optional local example configs.
 - If you widen the builder scope, preserve the narrow-fast path for small curated runs.

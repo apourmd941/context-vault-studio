@@ -175,3 +175,13 @@ def test_create_preset(tmp_path: Path, monkeypatch) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["name"] == "Research Vault"
+
+
+def test_bootstrap_includes_guided_demo_example(tmp_path: Path, monkeypatch) -> None:
+    client = make_client(tmp_path, monkeypatch)
+    response = client.get("/api/bootstrap")
+    assert response.status_code == 200
+    payload = response.json()
+    labels = [example["label"] for example in payload["examples"]]
+    assert "Guided Demo" in labels
+    assert payload["config"]["sources"]

@@ -1,0 +1,49 @@
+{
+  "vault_name": "Guided Demo Vault",
+  "output_dir": "../build/guided-demo-vault",
+  "default_mode": "copy",
+  "max_file_size_bytes": 5000000,
+  "default_exclude": [
+    ".DS_Store",
+    ".git/**",
+    ".idea/**",
+    ".next/**",
+    ".pytest_cache/**",
+    ".ruff_cache/**",
+    ".venv/**",
+    ".vscode/**",
+    "__pycache__/**",
+    "build/**",
+    "coverage/**",
+    "dist/**",
+    "node_modules/**",
+    "*.pyc",
+    "*.pyo",
+    "*.tsbuildinfo"
+  ],
+  "default_include": [],
+  "access": {
+    "allowed_roots": [
+      "../demo/sample_workspace"
+    ],
+    "blocked_paths": [],
+    "blocked_patterns": [
+      "**/private/**"
+    ],
+    "enforce_copy_mode": true
+  },
+  "sources": [
+    {
+      "name": "Sample workspace",
+      "category": "Demo",
+      "path": "../demo/sample_workspace",
+      "include": [
+        "**/*.md"
+      ],
+      "exclude": [
+        "archive/**"
+      ],
+      "mode": "copy"
+    }
+  ]
+}
