@@ -162,6 +162,13 @@ Turn the earlier Obsidian-style mapping prototype into a real shareable app with
   - persisted parallel scan profile artifacts
 - exposed a profiling endpoint so the parallel engine can be exercised and measured inside the app backend
 
+## Phase 17
+
+- added hash-aware file records to snapshot generation
+- introduced a delta snapshot flow that compares the current scoped file hashes to an earlier snapshot bundle
+- persisted delta snapshot artifacts and exposed them through the backend bootstrap and API
+- this is the first real incremental comparison path instead of only storing full snapshot bundles
+
 ## Verification
 
 - `python3 -m py_compile` for the shared builder

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import json
 import os
 import posixpath
@@ -76,6 +77,7 @@ class FileRecord:
     extension: str
     is_text: bool
     summary: str
+    content_hash: str
 
 
 @dataclass
@@ -205,6 +207,14 @@ def read_text_safe(path: Path) -> str:
         return path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ""
+
+
+def hash_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 64), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def extract_summary(path: Path) -> str:
@@ -422,6 +432,7 @@ def scan_source(source: dict, defaults: dict) -> tuple[list[FileRecord], list[Sk
                     extension=file_path.suffix.lower(),
                     is_text=is_probably_text(file_path),
                     summary=extract_summary(file_path),
+                    content_hash=hash_file(file_path),
                 )
             )
 

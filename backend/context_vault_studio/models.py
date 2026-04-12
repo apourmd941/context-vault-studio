@@ -160,6 +160,11 @@ class ParallelScanRequest(BaseModel):
     max_workers: int = Field(default=4, ge=1, le=16)
 
 
+class DeltaSnapshotRequest(BaseModel):
+    config: WorkspaceConfig
+    previous_snapshot_bundle_id: str = Field(..., min_length=1)
+
+
 class AdapterCapabilities(BaseModel):
     adapter_id: str = Field(..., min_length=1)
     label: str = Field(..., min_length=1)

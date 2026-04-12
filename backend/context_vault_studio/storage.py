@@ -30,6 +30,8 @@ BUILD_APPLY_RUNS_PATH = STATE_DIR / "build_apply_runs.json"
 BUILD_APPLY_RUNS_DIR = STATE_DIR / "build_apply_runs"
 PARALLEL_SCAN_PROFILES_PATH = STATE_DIR / "parallel_scan_profiles.json"
 PARALLEL_SCAN_PROFILES_DIR = STATE_DIR / "parallel_scan_profiles"
+DELTA_SNAPSHOTS_PATH = STATE_DIR / "delta_snapshots.json"
+DELTA_SNAPSHOTS_DIR = STATE_DIR / "delta_snapshots"
 STARTER_CONFIG_PATH = REPO_ROOT / "configs" / "starter_workspace.json"
 GUIDED_DEMO_CONFIG_PATH = REPO_ROOT / "configs" / "guided_demo.json"
 LOCAL_NEUTRON_EXAMPLE_PATH = REPO_ROOT / "config" / "neutron_curated.example.json"
@@ -445,6 +447,43 @@ def save_parallel_scan_profile(payload: dict) -> dict:
         if item.get("id") != profile_id:
             next_records.append(item)
     _write_json(PARALLEL_SCAN_PROFILES_PATH, next_records[:120])
+    return record
+
+
+def load_delta_snapshots() -> list[dict]:
+    payload = _read_json(DELTA_SNAPSHOTS_PATH)
+    return payload if isinstance(payload, list) else []
+
+
+def save_delta_snapshot(payload: dict) -> dict:
+    ensure_state_dir()
+    DELTA_SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    snapshot_id = payload.get("id") or str(uuid.uuid4())
+    created_at = payload.get("created_at") or _now_iso()
+    snapshot_dir = DELTA_SNAPSHOTS_DIR / snapshot_id
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+
+    artifact_file = snapshot_dir / "delta_snapshot.json"
+    artifact_file.write_text(json.dumps(payload.get("delta", {}), indent=2) + "\n", encoding="utf-8")
+
+    record = {
+        "id": snapshot_id,
+        "created_at": created_at,
+        "label": payload.get("label") or "Delta snapshot",
+        "snapshot_dir": str(snapshot_dir),
+        "artifacts": {"delta_file": str(artifact_file)},
+        "changed_count": int(payload.get("changed_count", 0)),
+        "added_count": int(payload.get("added_count", 0)),
+        "removed_count": int(payload.get("removed_count", 0)),
+    }
+
+    current = load_delta_snapshots()
+    next_records = [record]
+    for item in current:
+        if item.get("id") != snapshot_id:
+            next_records.append(item)
+    _write_json(DELTA_SNAPSHOTS_PATH, next_records[:120])
     return record
 
 

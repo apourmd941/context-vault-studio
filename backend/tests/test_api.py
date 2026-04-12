@@ -555,3 +555,79 @@ def test_parallel_scan_profile_returns_worker_summary(tmp_path: Path, monkeypatc
     assert payload["record"]["worker_count"] == 2
     assert payload["profile"]["summary"]["file_count"] == 2
     assert payload["profile"]["top_extensions"]
+
+
+def test_parallel_scan_delta_detects_changed_files(tmp_path: Path, monkeypatch) -> None:
+    source_dir = tmp_path / "docs"
+    source_dir.mkdir()
+    readme = source_dir / "README.md"
+    readme.write_text("# Demo Vault\n\nA top note.\n", encoding="utf-8")
+
+    client = make_client(tmp_path, monkeypatch)
+    preview = client.post(
+        "/api/preview",
+        json={
+            "config": {
+                "vault_name": "Delta Vault",
+                "output_dir": str(tmp_path / "output"),
+                "default_mode": "copy",
+                "max_file_size_bytes": 5000000,
+                "default_exclude": [],
+                "default_include": [],
+                "access": {
+                    "allowed_roots": [str(source_dir)],
+                    "blocked_paths": [],
+                    "blocked_patterns": [],
+                    "enforce_copy_mode": True,
+                },
+                "sources": [
+                    {
+                        "name": "demo-docs",
+                        "category": "Docs",
+                        "path": str(source_dir),
+                        "include": ["*.md"],
+                        "exclude": [],
+                    }
+                ],
+            },
+            "clean": True,
+        },
+    )
+    assert preview.status_code == 200
+    previous_bundle_id = preview.json()["snapshot_bundle"]["id"]
+
+    readme.write_text("# Demo Vault\n\nUpdated content.\n", encoding="utf-8")
+
+    delta = client.post(
+        "/api/parallel-scan/delta",
+        json={
+            "previous_snapshot_bundle_id": previous_bundle_id,
+            "config": {
+                "vault_name": "Delta Vault",
+                "output_dir": str(tmp_path / "output"),
+                "default_mode": "copy",
+                "max_file_size_bytes": 5000000,
+                "default_exclude": [],
+                "default_include": [],
+                "access": {
+                    "allowed_roots": [str(source_dir)],
+                    "blocked_paths": [],
+                    "blocked_patterns": [],
+                    "enforce_copy_mode": True,
+                },
+                "sources": [
+                    {
+                        "name": "demo-docs",
+                        "category": "Docs",
+                        "path": str(source_dir),
+                        "include": ["*.md"],
+                        "exclude": [],
+                    }
+                ],
+            },
+        },
+    )
+    assert delta.status_code == 200
+    delta_json = delta.json()
+    assert delta_json["record"]["changed_count"] == 1
+    assert "README.md" in delta_json["delta"]["changed_files"]
