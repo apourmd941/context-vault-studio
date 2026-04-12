@@ -6,6 +6,7 @@ import os
 import posixpath
 import re
 import shutil
+import uuid
 from copy import deepcopy
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -565,6 +566,182 @@ def write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def build_feature_clusters(records: list[FileRecord]) -> list[dict[str, object]]:
+    by_category: dict[str, list[FileRecord]] = {}
+    by_source: dict[str, list[FileRecord]] = {}
+    by_extension: dict[str, list[FileRecord]] = {}
+
+    for record in records:
+        by_category.setdefault(record.category or "Uncategorized", []).append(record)
+        by_source.setdefault(record.source_name, []).append(record)
+        extension = record.extension or "no-extension"
+        by_extension.setdefault(extension, []).append(record)
+
+    clusters: list[dict[str, object]] = []
+
+    for category, items in sorted(by_category.items(), key=lambda item: (-len(item[1]), item[0].lower())):
+        clusters.append(
+            {
+                "id": f"category:{slugify(category)}",
+                "type": "category",
+                "label": category,
+                "file_count": len(items),
+                "examples": [record.rel_path for record in items[:5]],
+            }
+        )
+
+    for source_name, items in sorted(by_source.items(), key=lambda item: (-len(item[1]), item[0].lower())):
+        clusters.append(
+            {
+                "id": f"source:{slugify(source_name)}",
+                "type": "source",
+                "label": source_name,
+                "file_count": len(items),
+                "examples": [record.rel_path for record in items[:5]],
+            }
+        )
+
+    for extension, items in sorted(by_extension.items(), key=lambda item: (-len(item[1]), item[0].lower()))[:8]:
+        clusters.append(
+            {
+                "id": f"extension:{slugify(extension)}",
+                "type": "extension",
+                "label": extension,
+                "file_count": len(items),
+                "examples": [record.rel_path for record in items[:5]],
+            }
+        )
+
+    return clusters
+
+
+def build_architecture_summary(
+    *,
+    vault_name: str,
+    summary: dict,
+    source_summaries: list[dict],
+    feature_clusters: list[dict[str, object]],
+    access: dict,
+) -> str:
+    lines = [
+        f"# {vault_name} Snapshot",
+        "",
+        f"- Generated at: `{summary['generated_at']}`",
+        f"- Sources: `{summary['source_count']}`",
+        f"- Files: `{summary['file_count']}`",
+        f"- Edges: `{summary['edge_count']}`",
+        f"- Skipped: `{summary['skipped_count']}`",
+        "",
+        "## Sources",
+        "",
+    ]
+
+    for source in source_summaries:
+        lines.append(
+            f"- **{source['name']}** (`{source['category']}`): "
+            f"{source['file_count']} files from `{source['source_path']}`"
+        )
+
+    lines.extend(["", "## Feature Clusters", ""])
+    if feature_clusters:
+        for cluster in feature_clusters[:10]:
+            examples = ", ".join(f"`{item}`" for item in cluster.get("examples", [])[:3])
+            lines.append(
+                f"- **{cluster['label']}** ({cluster['type']}): {cluster['file_count']} files"
+                + (f" — {examples}" if examples else "")
+            )
+    else:
+        lines.append("- No clusters generated.")
+
+    lines.extend(["", "## Policy Summary", ""])
+    lines.append(f"- Allowed roots: `{len(access.get('allowed_roots', []))}`")
+    lines.append(f"- Blocked paths: `{len(access.get('blocked_paths', []))}`")
+    lines.append(f"- Blocked patterns: `{len(access.get('blocked_patterns', []))}`")
+    lines.append(
+        "- Copy-only boundary: "
+        + ("enabled" if access.get("enforce_copy_mode", True) else "disabled")
+    )
+
+    return "\n".join(lines) + "\n"
+
+
+def build_snapshot_bundle_payload(
+    *,
+    vault_name: str,
+    generated_at: str,
+    normalized: dict,
+    summary: dict,
+    source_summaries: list[dict],
+    all_records: list[FileRecord],
+    all_skipped: list[SkippedRecord],
+    nodes: list[dict[str, object]],
+    edges: list[dict[str, str]],
+    artifacts: dict,
+    dry_run: bool,
+) -> dict:
+    feature_clusters = build_feature_clusters(all_records)
+    architecture_summary = build_architecture_summary(
+        vault_name=vault_name,
+        summary=summary,
+        source_summaries=source_summaries,
+        feature_clusters=feature_clusters,
+        access=normalized.get("access", {}),
+    )
+    sources = normalized.get("sources", [])
+
+    return {
+        "id": f"snapshot-{slugify(vault_name)}-{'preview' if dry_run else 'build'}-{uuid.uuid4().hex[:8]}",
+        "created_at": generated_at,
+        "label": f"{vault_name} {'preview' if dry_run else 'build'} snapshot",
+        "kind": "preview" if dry_run else "build",
+        "summary": summary,
+        "snapshot_meta": {
+            "version": 1,
+            "generated_at": generated_at,
+            "vault_name": vault_name,
+            "dry_run": dry_run,
+            "artifacts": artifacts,
+        },
+        "file_manifest": {
+            "summary": summary,
+            "files": [asdict(record) for record in all_records],
+            "skipped": [asdict(record) for record in all_skipped],
+        },
+        "edges": {
+            "summary": {
+                "node_count": len(nodes),
+                "edge_count": len(edges),
+            },
+            "nodes": nodes,
+            "edges": edges,
+        },
+        "feature_clusters": feature_clusters,
+        "architecture_summary": architecture_summary,
+        "policy_bundle": {
+            "access": normalized.get("access", {}),
+            "default_mode": normalized.get("default_mode", "copy"),
+            "default_include": normalized.get("default_include", []),
+            "default_exclude": normalized.get("default_exclude", []),
+            "sources": [
+                {
+                    "name": source.get("name"),
+                    "category": source.get("category"),
+                    "path": source.get("path"),
+                    "include": source.get("include", []),
+                    "exclude": source.get("exclude", []),
+                    "mode": source.get("mode") or normalized.get("default_mode", "copy"),
+                }
+                for source in sources
+            ],
+        },
+        "slcs_context": {
+            "status": "not_configured",
+            "relevant_sources": [source.get("name") for source in sources],
+            "note": "Build can later consume this scoped snapshot bundle instead of raw repo state.",
+        },
+    }
+
+
 def build_workspace_from_config(
     config: dict,
     *,
@@ -733,11 +910,26 @@ def build_workspace_from_config(
     if progress_callback:
         progress_callback({"progress": 98, "message": "Finalizing result"})
 
+    snapshot_bundle_payload = build_snapshot_bundle_payload(
+        vault_name=vault_name,
+        generated_at=generated_at,
+        normalized=normalized,
+        summary=summary,
+        source_summaries=source_summaries,
+        all_records=all_records,
+        all_skipped=all_skipped,
+        nodes=nodes,
+        edges=edges,
+        artifacts=artifacts,
+        dry_run=dry_run,
+    )
+
     return {
         "config": normalized,
         "summary": summary,
         "artifacts": artifacts,
         "source_summaries": source_summaries,
+        "snapshot_bundle_payload": snapshot_bundle_payload,
         "graph": {
             "nodes": nodes,
             "edges": edges,

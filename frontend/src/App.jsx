@@ -279,7 +279,7 @@ function QuickStartPanel({
 }
 
 
-function ResultSpotlight({ result, outputDir, onOpenNotes, onOpenGraph }) {
+function ResultSpotlight({ result, outputDir, snapshotBundle, onOpenNotes, onOpenGraph }) {
   if (!result) {
     return null;
   }
@@ -316,6 +316,23 @@ function ResultSpotlight({ result, outputDir, onOpenNotes, onOpenGraph }) {
           <div className="microcopy">{result.summary?.generated_at || "—"}</div>
         </div>
       </div>
+      {snapshotBundle ? (
+        <div className="result-summary">
+          <div>
+            <span className="eyebrow">Snapshot bundle</span>
+            <div className="microcopy">{snapshotBundle.label}</div>
+            <div className="microcopy">{snapshotBundle.bundle_dir}</div>
+          </div>
+          <div>
+            <span className="eyebrow">Reusable artifacts</span>
+            <div className="microcopy">
+              {snapshotBundle.file_count ?? 0} files, {snapshotBundle.edge_count ?? 0} edges,{" "}
+              {snapshotBundle.feature_cluster_count ?? 0} clusters
+            </div>
+            <div className="microcopy">SLCS context: {snapshotBundle.slcs_status || "not_configured"}</div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -496,6 +513,7 @@ export default function App() {
   const [buildHistory, setBuildHistory] = useState([]);
   const [bookmarks, setBookmarks] = useState([]);
   const [snapshots, setSnapshots] = useState([]);
+  const [snapshotBundles, setSnapshotBundles] = useState([]);
   const [canvases, setCanvases] = useState([]);
   const [selectedCanvasId, setSelectedCanvasId] = useState("");
   const [jobs, setJobs] = useState([]);
@@ -568,6 +586,7 @@ export default function App() {
           setBuildHistory(payload.build_history ?? []);
           setBookmarks(payload.bookmarks ?? []);
           setSnapshots(payload.snapshots ?? []);
+          setSnapshotBundles(payload.snapshot_bundles ?? []);
           setCanvases(payload.canvases ?? []);
           setSelectedCanvasId((payload.canvases ?? [])[0]?.id || "");
           setJobs(payload.jobs ?? []);
@@ -648,6 +667,12 @@ export default function App() {
           const result = normalizeResult(job.result);
           if (job.kind === "preview") {
             setPreview(result);
+            if (result.snapshot_bundle) {
+              setSnapshotBundles((current) => [
+                result.snapshot_bundle,
+                ...current.filter((item) => item.id !== result.snapshot_bundle.id),
+              ].slice(0, 20));
+            }
             setNotice(
               result.summary?.file_count
                 ? `Preview ready. ${result.summary.file_count} files are now visible in the workspace.`
@@ -657,6 +682,12 @@ export default function App() {
           } else {
             setBuildResult(result);
             setPreview(result);
+            if (result.snapshot_bundle) {
+              setSnapshotBundles((current) => [
+                result.snapshot_bundle,
+                ...current.filter((item) => item.id !== result.snapshot_bundle.id),
+              ].slice(0, 20));
+            }
             setBuildHistory(await fetchBuildHistory());
             setNotice(
               `Vault built with ${result.summary?.file_count ?? 0} files at ${
@@ -1323,6 +1354,7 @@ export default function App() {
                 <ResultSpotlight
                   result={activeResult}
                   outputDir={buildResult?.artifacts?.vault_dir}
+                  snapshotBundle={activeResult?.snapshot_bundle || snapshotBundles[0]}
                   onOpenNotes={() => setActiveTab("notes")}
                   onOpenGraph={() => setActiveTab("graph")}
                 />

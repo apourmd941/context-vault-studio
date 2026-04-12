@@ -10,6 +10,7 @@ from pathlib import Path
 from context_vault_studio.services.workspace_builder import build_workspace_from_config
 from context_vault_studio.storage import (
     REPO_ROOT,
+    attach_snapshot_bundle,
     append_build_history,
     save_last_result,
     save_workspace_config,
@@ -81,6 +82,7 @@ def _run_job(job_id: str, kind: str, config: dict, clean: bool) -> None:
             clean=clean,
             progress_callback=progress_callback,
         )
+        attach_snapshot_bundle(result)
         save_workspace_config(result["config"])
         if kind == "build":
             save_last_result(result)
@@ -90,6 +92,7 @@ def _run_job(job_id: str, kind: str, config: dict, clean: bool) -> None:
                     "created_at": _now_iso(),
                     "summary": result["summary"],
                     "artifacts": result["artifacts"],
+                    "snapshot_bundle": result.get("snapshot_bundle"),
                     "config": result["config"],
                 }
             )

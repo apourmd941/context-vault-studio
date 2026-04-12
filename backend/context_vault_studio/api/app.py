@@ -38,6 +38,7 @@ from context_vault_studio.storage import (
     APP_NAME,
     REPO_ROOT,
     add_bookmark,
+    attach_snapshot_bundle,
     append_build_history,
     append_snapshot,
     delete_bookmark,
@@ -50,6 +51,8 @@ from context_vault_studio.storage import (
     load_layout,
     load_last_result,
     load_presets,
+    load_snapshot_bundle,
+    load_snapshot_bundles,
     load_snapshots,
     load_workspace_config,
     save_layout,
@@ -99,6 +102,7 @@ def bootstrap() -> dict:
         "bookmarks": load_bookmarks(),
         "layout": load_layout(),
         "snapshots": load_snapshots()[:20],
+        "snapshot_bundles": load_snapshot_bundles()[:20],
         "canvases": load_canvases(),
         "jobs": list_jobs()[:8],
         "last_result": load_last_result(),
@@ -157,6 +161,19 @@ def remove_canvas(canvas_id: str) -> dict:
 @app.get("/api/snapshots")
 def snapshots() -> list[dict]:
     return load_snapshots()
+
+
+@app.get("/api/snapshot-bundles")
+def snapshot_bundles() -> list[dict]:
+    return load_snapshot_bundles()
+
+
+@app.get("/api/snapshot-bundles/{bundle_id}")
+def snapshot_bundle(bundle_id: str) -> dict:
+    payload = load_snapshot_bundle(bundle_id)
+    if not payload:
+        raise HTTPException(status_code=404, detail="Snapshot bundle not found")
+    return payload
 
 
 @app.get("/api/presets")
@@ -240,6 +257,7 @@ def preview_workspace(request: BuildRequest) -> dict:
     except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    attach_snapshot_bundle(result)
     save_workspace_config(result["config"])
     return result
 
@@ -257,6 +275,7 @@ def build_workspace(request: BuildRequest) -> dict:
     except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    attach_snapshot_bundle(result)
     save_workspace_config(result["config"])
     save_last_result(result)
     append_build_history(
@@ -265,6 +284,7 @@ def build_workspace(request: BuildRequest) -> dict:
             "created_at": result["summary"]["generated_at"],
             "summary": result["summary"],
             "artifacts": result["artifacts"],
+            "snapshot_bundle": result.get("snapshot_bundle"),
             "config": result["config"],
         }
     )

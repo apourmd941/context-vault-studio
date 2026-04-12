@@ -27,6 +27,7 @@ Instead of pointing Claude or Codex at a giant parent folder, you define a tight
 - previews matched files before writing anything
 - builds an Obsidian-friendly vault with home and map notes
 - exports `context_graph.json` and `manifest.json`
+- persists reusable snapshot bundles with manifest, edge, cluster, policy, and architecture artifacts
 - renders an Obsidian-style local graph in the UI
 - supports explorer, quick switcher, note preview, backlinks, and outgoing links
 - runs preview and build work as background jobs with persisted history
@@ -51,6 +52,7 @@ The app now opens with a simpler `Vault` home first.
   - arrange note and text cards on a board
 - `Graph`
   - inspect the current local graph and jump back into notes
+- current result also carries a reusable snapshot bundle for later Explain / Build-style workflows
 
 The first recommended run is:
 

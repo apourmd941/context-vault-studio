@@ -22,6 +22,8 @@ BOOKMARKS_PATH = STATE_DIR / "bookmarks.json"
 LAYOUT_PATH = STATE_DIR / "layout.json"
 SNAPSHOTS_PATH = STATE_DIR / "snapshots.json"
 CANVASES_PATH = STATE_DIR / "canvases.json"
+SNAPSHOT_BUNDLES_PATH = STATE_DIR / "snapshot_bundles.json"
+SNAPSHOT_BUNDLES_DIR = STATE_DIR / "snapshot_bundles"
 STARTER_CONFIG_PATH = REPO_ROOT / "configs" / "starter_workspace.json"
 GUIDED_DEMO_CONFIG_PATH = REPO_ROOT / "configs" / "guided_demo.json"
 LOCAL_NEUTRON_EXAMPLE_PATH = REPO_ROOT / "config" / "neutron_curated.example.json"
@@ -166,6 +168,119 @@ def append_build_history(entry: dict) -> None:
     history = load_build_history()
     history.insert(0, entry)
     _write_json(BUILD_HISTORY_PATH, history[:50])
+
+
+def load_snapshot_bundles() -> list[dict]:
+    payload = _read_json(SNAPSHOT_BUNDLES_PATH)
+    return payload if isinstance(payload, list) else []
+
+
+def _snapshot_bundle_dir(bundle_id: str) -> Path:
+    return SNAPSHOT_BUNDLES_DIR / bundle_id
+
+
+def save_snapshot_bundle(payload: dict) -> dict:
+    ensure_state_dir()
+    SNAPSHOT_BUNDLES_DIR.mkdir(parents=True, exist_ok=True)
+
+    bundle_id = payload.get("id") or str(uuid.uuid4())
+    created_at = payload.get("created_at") or _now_iso()
+    bundle_dir = _snapshot_bundle_dir(bundle_id)
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+
+    artifact_paths = {
+        "snapshot_meta_file": bundle_dir / "snapshot_meta.json",
+        "file_manifest_file": bundle_dir / "file_manifest.json",
+        "edges_file": bundle_dir / "edges.json",
+        "feature_clusters_file": bundle_dir / "feature_clusters.json",
+        "policy_bundle_file": bundle_dir / "policy_bundle.json",
+        "slcs_context_file": bundle_dir / "slcs_context.json",
+        "architecture_summary_file": bundle_dir / "architecture_summary.md",
+    }
+
+    artifact_paths["snapshot_meta_file"].write_text(
+        json.dumps(payload.get("snapshot_meta", {}), indent=2) + "\n",
+        encoding="utf-8",
+    )
+    artifact_paths["file_manifest_file"].write_text(
+        json.dumps(payload.get("file_manifest", {}), indent=2) + "\n",
+        encoding="utf-8",
+    )
+    artifact_paths["edges_file"].write_text(
+        json.dumps(payload.get("edges", {}), indent=2) + "\n",
+        encoding="utf-8",
+    )
+    artifact_paths["feature_clusters_file"].write_text(
+        json.dumps(payload.get("feature_clusters", []), indent=2) + "\n",
+        encoding="utf-8",
+    )
+    artifact_paths["policy_bundle_file"].write_text(
+        json.dumps(payload.get("policy_bundle", {}), indent=2) + "\n",
+        encoding="utf-8",
+    )
+    artifact_paths["slcs_context_file"].write_text(
+        json.dumps(payload.get("slcs_context", {}), indent=2) + "\n",
+        encoding="utf-8",
+    )
+    artifact_paths["architecture_summary_file"].write_text(
+        payload.get("architecture_summary", "").rstrip() + "\n",
+        encoding="utf-8",
+    )
+
+    file_manifest = payload.get("file_manifest", {})
+    edges_payload = payload.get("edges", {})
+    feature_clusters = payload.get("feature_clusters", [])
+    slcs_context = payload.get("slcs_context", {})
+
+    record = {
+        "id": bundle_id,
+        "created_at": created_at,
+        "label": payload.get("label") or "Snapshot bundle",
+        "kind": payload.get("kind") or "preview",
+        "summary": payload.get("summary", {}),
+        "bundle_dir": str(bundle_dir),
+        "artifacts": {key: str(value) for key, value in artifact_paths.items()},
+        "file_count": len(file_manifest.get("files", [])),
+        "edge_count": len(edges_payload.get("edges", [])),
+        "feature_cluster_count": len(feature_clusters),
+        "slcs_status": slcs_context.get("status", "not_configured"),
+    }
+
+    existing = load_snapshot_bundles()
+    next_records = [record]
+    for item in existing:
+        if item.get("id") != bundle_id:
+            next_records.append(item)
+    _write_json(SNAPSHOT_BUNDLES_PATH, next_records[:120])
+    return record
+
+
+def load_snapshot_bundle(bundle_id: str) -> dict | None:
+    record = next((item for item in load_snapshot_bundles() if item.get("id") == bundle_id), None)
+    if not record:
+        return None
+
+    artifacts = record.get("artifacts", {})
+    bundle = deepcopy(record)
+    bundle["contents"] = {
+        "snapshot_meta": _read_json(Path(artifacts["snapshot_meta_file"])),
+        "file_manifest": _read_json(Path(artifacts["file_manifest_file"])),
+        "edges": _read_json(Path(artifacts["edges_file"])),
+        "feature_clusters": _read_json(Path(artifacts["feature_clusters_file"])),
+        "policy_bundle": _read_json(Path(artifacts["policy_bundle_file"])),
+        "slcs_context": _read_json(Path(artifacts["slcs_context_file"])),
+        "architecture_summary": Path(artifacts["architecture_summary_file"]).read_text(encoding="utf-8"),
+    }
+    return bundle
+
+
+def attach_snapshot_bundle(result: dict) -> dict | None:
+    payload = result.pop("snapshot_bundle_payload", None)
+    if not payload:
+        return None
+    record = save_snapshot_bundle(payload)
+    result["snapshot_bundle"] = record
+    return record
 
 
 def load_bookmarks() -> list[dict]:

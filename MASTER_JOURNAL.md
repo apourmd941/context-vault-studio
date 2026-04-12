@@ -65,6 +65,20 @@ Turn the earlier Obsidian-style mapping prototype into a real shareable app with
 - added a bundled guided demo that previews and builds successfully out of the box
 - verified the guided demo through the CLI dry-run path so the first-run experience is deterministic
 
+## Phase 9
+
+- added reusable snapshot bundles for preview and build runs
+- each bundle now persists:
+  - snapshot metadata
+  - file manifest
+  - graph edges
+  - feature clusters
+  - architecture summary
+  - policy bundle
+  - SLCS context placeholder
+- exposed snapshot bundles through bootstrap and dedicated API endpoints
+- surfaced the current snapshot bundle in the Vault result spotlight so future Explain / Build phases have a concrete handoff artifact
+
 ## Verification
 
 - `python3 -m py_compile` for the shared builder

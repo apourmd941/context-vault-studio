@@ -31,6 +31,7 @@ Build a cross-platform local app that lets people:
 - Shared builder: reusable backend service also exposed through the CLI wrapper
 - Storage:
   - JSON app state in `data/app_state`
+  - snapshot bundle artifacts under `data/app_state/snapshot_bundles`
   - generated vault artifacts under the chosen output directory
 
 ## Invariants
@@ -55,6 +56,7 @@ Build a cross-platform local app that lets people:
   - note editing and creation
   - bookmarks
   - snapshots
+  - snapshot bundles
   - canvas boards
   - preview/build job tracking
   - graph view
@@ -70,6 +72,8 @@ Build a cross-platform local app that lets people:
   - `GET /api/canvases`
   - `POST /api/canvases`
   - `GET /api/snapshots`
+  - `GET /api/snapshot-bundles`
+  - `GET /api/snapshot-bundles/{bundle_id}`
   - `GET /api/build-history`
   - `GET /api/jobs`
   - `POST /api/jobs`

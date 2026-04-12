@@ -45,12 +45,27 @@ def test_preview_and_build_round_trip(tmp_path: Path, monkeypatch) -> None:
     preview_json = preview.json()
     assert preview_json["summary"]["file_count"] == 2
     assert preview_json["summary"]["edge_count"] >= 1
+    assert preview_json["snapshot_bundle"]["kind"] == "preview"
+    assert Path(preview_json["snapshot_bundle"]["artifacts"]["file_manifest_file"]).exists()
 
     build = client.post("/api/build", json=payload)
     assert build.status_code == 200
     build_json = build.json()
     assert Path(build_json["artifacts"]["home_note"]).exists()
     assert Path(build_json["artifacts"]["graph_file"]).exists()
+    assert build_json["snapshot_bundle"]["kind"] == "build"
+    assert Path(build_json["snapshot_bundle"]["artifacts"]["architecture_summary_file"]).exists()
+
+    bundles = client.get("/api/snapshot-bundles")
+    assert bundles.status_code == 200
+    bundles_json = bundles.json()
+    assert len(bundles_json) >= 2
+
+    bundle_detail = client.get(f"/api/snapshot-bundles/{build_json['snapshot_bundle']['id']}")
+    assert bundle_detail.status_code == 200
+    detail_json = bundle_detail.json()
+    assert detail_json["contents"]["file_manifest"]["summary"]["file_count"] == 2
+    assert "architecture_summary" in detail_json["contents"]
 
 
 def test_path_inspect_lists_children(tmp_path: Path, monkeypatch) -> None:
