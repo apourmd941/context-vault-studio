@@ -77,6 +77,7 @@ Build a cross-platform local app that lets people:
   - `GET /api/build-adapters/capabilities`
   - `GET /api/build-adapters/contracts`
   - `POST /api/build-adapters/task-packet`
+  - `POST /api/build-adapters/run`
   - `GET /api/build-history`
   - `GET /api/jobs`
   - `POST /api/jobs`

@@ -272,3 +272,58 @@ def test_build_task_packet_uses_snapshot_bundle(tmp_path: Path, monkeypatch) -> 
     assert packet_json["selected_slcs_pieces"] == ["docs_cleanup_piece"]
     assert packet_json["scope"]["file_count"] == 1
     assert packet_json["policy_bundle"]["access"]["enforce_copy_mode"] is True
+
+
+def test_build_adapter_run_returns_normalized_stub_result(tmp_path: Path, monkeypatch) -> None:
+    source_dir = tmp_path / "docs"
+    source_dir.mkdir()
+    (source_dir / "README.md").write_text("# Demo Vault\n\nA top note.\n", encoding="utf-8")
+
+    client = make_client(tmp_path, monkeypatch)
+    preview = client.post(
+        "/api/preview",
+        json={
+            "config": {
+                "vault_name": "Demo Vault",
+                "output_dir": str(tmp_path / "output"),
+                "default_mode": "copy",
+                "max_file_size_bytes": 5000000,
+                "default_exclude": [],
+                "default_include": [],
+                "access": {
+                    "allowed_roots": [str(source_dir)],
+                    "blocked_paths": [],
+                    "blocked_patterns": [],
+                    "enforce_copy_mode": True,
+                },
+                "sources": [
+                    {
+                        "name": "demo-docs",
+                        "category": "Docs",
+                        "path": str(source_dir),
+                        "include": ["*.md"],
+                        "exclude": [],
+                    }
+                ],
+            },
+            "clean": True,
+        },
+    )
+    assert preview.status_code == 200
+    bundle_id = preview.json()["snapshot_bundle"]["id"]
+
+    run_result = client.post(
+        "/api/build-adapters/run",
+        json={
+            "goal": "Plan a docs cleanup pass",
+            "snapshot_bundle_id": bundle_id,
+            "adapter_id": "local_cli",
+            "selected_slcs_pieces": ["docs_cleanup_piece"],
+        },
+    )
+    assert run_result.status_code == 200
+    run_json = run_result.json()
+    assert run_json["task_packet"]["snapshot_bundle_id"] == bundle_id
+    assert run_json["adapter_capabilities"]["adapter_id"] == "local_cli"
+    assert run_json["normalized_result"]["adapter_id"] == "local_cli"
+    assert run_json["normalized_result"]["status"] == "needs_revision"

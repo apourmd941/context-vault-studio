@@ -29,6 +29,7 @@ from context_vault_studio.services.build_adapters import (
     build_adapter_contract_schemas,
     build_task_packet,
     list_build_adapter_capabilities,
+    run_build_adapter,
 )
 from context_vault_studio.services.workspace_builder import (
     build_workspace_from_config,
@@ -203,6 +204,21 @@ def build_adapter_task_packet(payload: BuildTaskRequest) -> dict:
     if not bundle:
         raise HTTPException(status_code=400, detail="Create a preview or build snapshot bundle before generating a task packet")
     return build_task_packet(payload, bundle)
+
+
+@app.post("/api/build-adapters/run")
+def build_adapter_run(payload: BuildTaskRequest) -> dict:
+    bundle_id = payload.snapshot_bundle_id
+    bundle = load_snapshot_bundle(bundle_id) if bundle_id else None
+    if not bundle:
+        bundles = load_snapshot_bundles()
+        bundle = load_snapshot_bundle(bundles[0]["id"]) if bundles else None
+    if not bundle:
+        raise HTTPException(status_code=400, detail="Create a preview or build snapshot bundle before running an adapter")
+    try:
+        return run_build_adapter(payload, bundle)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/presets")

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
+from typing import Protocol
 
 from context_vault_studio.models import (
     AdapterCapabilities,
@@ -75,6 +77,13 @@ def list_build_adapter_capabilities() -> list[dict]:
     return [item.model_dump() for item in ADAPTER_CAPABILITIES]
 
 
+def _capability_by_id(adapter_id: str) -> AdapterCapabilities:
+    for item in ADAPTER_CAPABILITIES:
+        if item.adapter_id == adapter_id:
+            return item
+    raise KeyError(adapter_id)
+
+
 def build_adapter_contract_schemas() -> dict:
     return {
         "build_task_request": BuildTaskRequest.model_json_schema(),
@@ -125,3 +134,78 @@ def build_task_packet(request: BuildTaskRequest, snapshot_bundle: dict) -> dict:
         },
     )
     return packet.model_dump()
+
+
+class BuildAdapter(Protocol):
+    adapter_id: str
+
+    def capabilities(self) -> AdapterCapabilities: ...
+
+    def run(self, packet: dict, snapshot_bundle: dict) -> dict: ...
+
+
+@dataclass
+class _BaseAdapter:
+    adapter_id: str
+
+    def capabilities(self) -> AdapterCapabilities:
+        return _capability_by_id(self.adapter_id)
+
+    def run(self, packet: dict, snapshot_bundle: dict) -> dict:
+        raise NotImplementedError
+
+
+class InformationalAdapter(_BaseAdapter):
+    def run(self, packet: dict, snapshot_bundle: dict) -> dict:
+        capability = self.capabilities()
+        return NormalizedBuildResult(
+            request_id=packet["request_id"],
+            adapter_id=self.adapter_id,
+            status="needs_revision",
+            plan={
+                "summary": f"{capability.label} is declared and discoverable, but not configured yet in this repo.",
+                "steps": [
+                    "Keep using the formal task packet contract.",
+                    f"Attach a real {capability.transport} transport when this backend is introduced.",
+                    "Validate outputs through the same normalized result gate.",
+                ],
+            },
+            file_actions=[],
+            patches=[],
+            warnings=[
+                f"{capability.label} is currently a stub adapter.",
+                f"Snapshot bundle {snapshot_bundle.get('id')} was preserved as the governed source of truth.",
+            ],
+            raw_output_ref=f"adapter://{self.adapter_id}/not-configured",
+            validation=ValidationReport(
+                status="warning",
+                findings=[
+                    {
+                        "severity": "warning",
+                        "code": "adapter_not_configured",
+                        "message": f"{capability.label} is not configured in this local app yet.",
+                    }
+                ],
+            ),
+        ).model_dump()
+
+
+ADAPTERS: dict[str, BuildAdapter] = {
+    "deterministic": InformationalAdapter(adapter_id="deterministic"),
+    "cloud_api": InformationalAdapter(adapter_id="cloud_api"),
+    "local_server": InformationalAdapter(adapter_id="local_server"),
+    "local_cli": InformationalAdapter(adapter_id="local_cli"),
+    "file_handshake": InformationalAdapter(adapter_id="file_handshake"),
+}
+
+
+def run_build_adapter(request: BuildTaskRequest, snapshot_bundle: dict) -> dict:
+    packet = build_task_packet(request, snapshot_bundle)
+    adapter = ADAPTERS.get(request.adapter_id)
+    if adapter is None:
+        raise ValueError(f"Unknown adapter: {request.adapter_id}")
+    return {
+        "task_packet": packet,
+        "adapter_capabilities": adapter.capabilities().model_dump(),
+        "normalized_result": adapter.run(packet, snapshot_bundle),
+    }

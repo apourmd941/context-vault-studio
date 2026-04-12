@@ -106,6 +106,21 @@ Turn the earlier Obsidian-style mapping prototype into a real shareable app with
   - allowed and forbidden path scope
 - this creates the first real handoff object for future deterministic or model-backed Build adapters
 
+## Phase 12
+
+- turned the adapter family into a real executable runner surface
+- all declared adapters now execute behind one contract:
+  - deterministic
+  - cloud API
+  - local server
+  - local CLI
+  - file-handshake
+- added a shared run endpoint that returns:
+  - the generated task packet
+  - adapter capability metadata
+  - a normalized result object
+- current non-deterministic adapters are still informational stubs, but they now conform to the same execution interface
+
 ## Verification
 
 - `python3 -m py_compile` for the shared builder
