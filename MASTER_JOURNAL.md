@@ -169,6 +169,16 @@ Turn the earlier Obsidian-style mapping prototype into a real shareable app with
 - persisted delta snapshot artifacts and exposed them through the backend bootstrap and API
 - this is the first real incremental comparison path instead of only storing full snapshot bundles
 
+## Phase 18
+
+- added a polling-based live monitor service
+- live monitor now supports:
+  - start
+  - status
+  - poll for created/modified/deleted files
+  - flush debounced batches
+- this gives the backend a real normalized change-event path before a fuller filesystem-watcher implementation
+
 ## Verification
 
 - `python3 -m py_compile` for the shared builder

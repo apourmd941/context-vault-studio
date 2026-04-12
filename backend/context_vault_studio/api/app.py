@@ -22,6 +22,7 @@ from context_vault_studio.models import (
     InspectPathRequest,
     JobRequest,
     LayoutPayload,
+    LiveMonitorRequest,
     ParallelScanRequest,
     PresetPayload,
     SnapshotRestorePayload,
@@ -37,6 +38,12 @@ from context_vault_studio.services.build_apply import apply_build_patch_preview
 from context_vault_studio.services.build_patch_gate import create_build_patch_preview
 from context_vault_studio.services.parallel_scan import build_parallel_scan_profile
 from context_vault_studio.services.incremental_snapshot import build_delta_snapshot
+from context_vault_studio.services.live_monitor import (
+    flush_live_monitor,
+    get_live_monitor,
+    poll_live_monitor,
+    start_live_monitor,
+)
 from context_vault_studio.services.workspace_builder import (
     build_workspace_from_config,
     evaluate_path_access,
@@ -308,6 +315,35 @@ def parallel_scan_delta(payload: DeltaSnapshotRequest) -> dict:
         return build_delta_snapshot(payload.config.model_dump(), previous)
     except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/live-monitor/start")
+def live_monitor_start(payload: LiveMonitorRequest) -> dict:
+    return start_live_monitor(payload.config.model_dump(), debounce_ms=payload.debounce_ms)
+
+
+@app.get("/api/live-monitor/{monitor_id}")
+def live_monitor_status(monitor_id: str) -> dict:
+    payload = get_live_monitor(monitor_id)
+    if not payload:
+        raise HTTPException(status_code=404, detail="Live monitor not found")
+    return payload
+
+
+@app.post("/api/live-monitor/{monitor_id}/poll")
+def live_monitor_poll(monitor_id: str) -> dict:
+    payload = poll_live_monitor(monitor_id)
+    if not payload:
+        raise HTTPException(status_code=404, detail="Live monitor not found")
+    return payload
+
+
+@app.post("/api/live-monitor/{monitor_id}/flush")
+def live_monitor_flush(monitor_id: str) -> dict:
+    payload = flush_live_monitor(monitor_id)
+    if not payload:
+        raise HTTPException(status_code=404, detail="Live monitor not found")
+    return payload
 
 
 @app.get("/api/presets")

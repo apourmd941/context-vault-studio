@@ -631,3 +631,54 @@ def test_parallel_scan_delta_detects_changed_files(tmp_path: Path, monkeypatch) 
     delta_json = delta.json()
     assert delta_json["record"]["changed_count"] == 1
     assert "README.md" in delta_json["delta"]["changed_files"]
+
+
+def test_live_monitor_detects_and_flushes_changes(tmp_path: Path, monkeypatch) -> None:
+    source_dir = tmp_path / "docs"
+    source_dir.mkdir()
+    readme = source_dir / "README.md"
+    readme.write_text("# Demo Vault\n\nA top note.\n", encoding="utf-8")
+
+    client = make_client(tmp_path, monkeypatch)
+    start = client.post(
+        "/api/live-monitor/start",
+        json={
+            "config": {
+                "vault_name": "Live Monitor Vault",
+                "output_dir": str(tmp_path / "output"),
+                "default_mode": "copy",
+                "max_file_size_bytes": 5000000,
+                "default_exclude": [],
+                "default_include": [],
+                "access": {
+                    "allowed_roots": [str(source_dir)],
+                    "blocked_paths": [],
+                    "blocked_patterns": [],
+                    "enforce_copy_mode": True,
+                },
+                "sources": [
+                    {
+                        "name": "demo-docs",
+                        "category": "Docs",
+                        "path": str(source_dir),
+                        "include": ["*.md"],
+                        "exclude": [],
+                    }
+                ],
+            },
+            "debounce_ms": 0,
+        },
+    )
+    assert start.status_code == 200
+    monitor_id = start.json()["id"]
+
+    readme.write_text("# Demo Vault\n\nChanged.\n", encoding="utf-8")
+    poll = client.post(f"/api/live-monitor/{monitor_id}/poll")
+    assert poll.status_code == 200
+    poll_json = poll.json()
+    assert poll_json["new_event_count"] >= 1
+
+    flush = client.post(f"/api/live-monitor/{monitor_id}/flush")
+    assert flush.status_code == 200
+    flush_json = flush.json()
+    assert flush_json["summary"]["modified"] >= 1

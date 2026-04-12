@@ -165,6 +165,11 @@ class DeltaSnapshotRequest(BaseModel):
     previous_snapshot_bundle_id: str = Field(..., min_length=1)
 
 
+class LiveMonitorRequest(BaseModel):
+    config: WorkspaceConfig
+    debounce_ms: int = Field(default=750, ge=0, le=10_000)
+
+
 class AdapterCapabilities(BaseModel):
     adapter_id: str = Field(..., min_length=1)
     label: str = Field(..., min_length=1)

@@ -87,6 +87,10 @@ Build a cross-platform local app that lets people:
   - `POST /api/build-adapters/apply-preview/{preview_id}`
   - `POST /api/parallel-scan/profile`
   - `POST /api/parallel-scan/delta`
+  - `POST /api/live-monitor/start`
+  - `GET /api/live-monitor/{monitor_id}`
+  - `POST /api/live-monitor/{monitor_id}/poll`
+  - `POST /api/live-monitor/{monitor_id}/flush`
   - `GET /api/build-history`
   - `GET /api/jobs`
   - `POST /api/jobs`
