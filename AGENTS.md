@@ -91,6 +91,7 @@ Build a cross-platform local app that lets people:
   - `GET /api/live-monitor/{monitor_id}`
   - `POST /api/live-monitor/{monitor_id}/poll`
   - `POST /api/live-monitor/{monitor_id}/flush`
+  - `POST /api/logic/profile`
   - `GET /api/build-history`
   - `GET /api/jobs`
   - `POST /api/jobs`

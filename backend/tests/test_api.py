@@ -682,3 +682,54 @@ def test_live_monitor_detects_and_flushes_changes(tmp_path: Path, monkeypatch) -
     assert flush.status_code == 200
     flush_json = flush.json()
     assert flush_json["summary"]["modified"] >= 1
+
+
+def test_logic_profile_extracts_symbols_and_routes(tmp_path: Path, monkeypatch) -> None:
+    source_dir = tmp_path / "repo"
+    source_dir.mkdir()
+    (source_dir / "app.py").write_text(
+        "from storage import save_file\n\n@app.get('/health')\ndef health():\n    return {'ok': True}\n",
+        encoding="utf-8",
+    )
+    (source_dir / "storage.py").write_text(
+        "def save_file(path):\n    return path\n\nSTORAGE_BACKEND = 'sqlite'\n",
+        encoding="utf-8",
+    )
+
+    client = make_client(tmp_path, monkeypatch)
+    response = client.post(
+        "/api/logic/profile",
+        json={
+            "config": {
+                "vault_name": "Logic Vault",
+                "output_dir": str(tmp_path / "output"),
+                "default_mode": "copy",
+                "max_file_size_bytes": 5000000,
+                "default_exclude": [],
+                "default_include": [],
+                "access": {
+                    "allowed_roots": [str(source_dir)],
+                    "blocked_paths": [],
+                    "blocked_patterns": [],
+                    "enforce_copy_mode": True,
+                },
+                "sources": [
+                    {
+                        "name": "code",
+                        "category": "Repo",
+                        "path": str(source_dir),
+                        "include": ["*.py"],
+                        "exclude": [],
+                    }
+                ],
+            },
+            "max_workers": 2,
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["profile"]["summary"]["file_count"] == 2
+    assert payload["profile"]["summary"]["import_count"] >= 1
+    assert payload["profile"]["summary"]["symbol_count"] >= 2
+    assert payload["profile"]["summary"]["route_count"] >= 1
+    assert payload["profile"]["summary"]["storage_touch_count"] >= 1

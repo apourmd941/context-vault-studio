@@ -179,6 +179,16 @@ Turn the earlier Obsidian-style mapping prototype into a real shareable app with
   - flush debounced batches
 - this gives the backend a real normalized change-event path before a fuller filesystem-watcher implementation
 
+## Phase 19
+
+- added a persisted Logic profile surface
+- Logic profiles now extract in parallel:
+  - imports
+  - symbols
+  - route hints
+  - storage hints
+- this is the first real semantic-linking layer for code-oriented Structure / Explain / Build follow-on work
+
 ## Verification
 
 - `python3 -m py_compile` for the shared builder

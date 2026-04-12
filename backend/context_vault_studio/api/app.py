@@ -23,6 +23,7 @@ from context_vault_studio.models import (
     JobRequest,
     LayoutPayload,
     LiveMonitorRequest,
+    LogicProfileRequest,
     ParallelScanRequest,
     PresetPayload,
     SnapshotRestorePayload,
@@ -44,6 +45,7 @@ from context_vault_studio.services.live_monitor import (
     poll_live_monitor,
     start_live_monitor,
 )
+from context_vault_studio.services.semantic_linking import build_logic_profile
 from context_vault_studio.services.workspace_builder import (
     build_workspace_from_config,
     evaluate_path_access,
@@ -84,6 +86,7 @@ from context_vault_studio.storage import (
     save_workspace_config,
     load_parallel_scan_profiles,
     load_delta_snapshots,
+    load_logic_profiles,
     upsert_canvas,
     upsert_preset,
 )
@@ -133,6 +136,7 @@ def bootstrap() -> dict:
         "build_apply_runs": load_build_apply_runs()[:20],
         "parallel_scan_profiles": load_parallel_scan_profiles()[:20],
         "delta_snapshots": load_delta_snapshots()[:20],
+        "logic_profiles": load_logic_profiles()[:20],
         "build_adapter_capabilities": list_build_adapter_capabilities(),
         "canvases": load_canvases(),
         "jobs": list_jobs()[:8],
@@ -344,6 +348,14 @@ def live_monitor_flush(monitor_id: str) -> dict:
     if not payload:
         raise HTTPException(status_code=404, detail="Live monitor not found")
     return payload
+
+
+@app.post("/api/logic/profile")
+def logic_profile(payload: LogicProfileRequest) -> dict:
+    try:
+        return build_logic_profile(payload.config.model_dump(), max_workers=payload.max_workers)
+    except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/presets")

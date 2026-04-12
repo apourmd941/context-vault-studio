@@ -170,6 +170,11 @@ class LiveMonitorRequest(BaseModel):
     debounce_ms: int = Field(default=750, ge=0, le=10_000)
 
 
+class LogicProfileRequest(BaseModel):
+    config: WorkspaceConfig
+    max_workers: int = Field(default=4, ge=1, le=16)
+
+
 class AdapterCapabilities(BaseModel):
     adapter_id: str = Field(..., min_length=1)
     label: str = Field(..., min_length=1)

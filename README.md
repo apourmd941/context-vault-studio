@@ -38,6 +38,7 @@ Instead of pointing Claude or Codex at a giant parent folder, you define a tight
 - includes a first parallel scan foundation in Python with worker-counted profiling of scoped sources
 - can now generate delta snapshots by hashing current scoped files and comparing them to an earlier snapshot bundle
 - includes a polling-based live monitor with debounced change batches for scoped sources
+- now exposes a persisted Logic profile with import, symbol, route, and storage-touch signals built in parallel
 - supports explorer, quick switcher, note preview, backlinks, and outgoing links
 - runs preview and build work as background jobs with persisted history
 - supports bookmarks, canvas boards, note editing, snapshots, and shareable export bundles
