@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from context_vault_studio.models import (
     BookmarkPayload,
+    BuildTaskRequest,
     BuildRequest,
     CanvasPayload,
     FileCreateRequest,
@@ -26,6 +27,7 @@ from context_vault_studio.models import (
 )
 from context_vault_studio.services.build_adapters import (
     build_adapter_contract_schemas,
+    build_task_packet,
     list_build_adapter_capabilities,
 )
 from context_vault_studio.services.workspace_builder import (
@@ -189,6 +191,18 @@ def build_adapter_capabilities() -> list[dict]:
 @app.get("/api/build-adapters/contracts")
 def build_adapter_contracts() -> dict:
     return build_adapter_contract_schemas()
+
+
+@app.post("/api/build-adapters/task-packet")
+def build_adapter_task_packet(payload: BuildTaskRequest) -> dict:
+    bundle_id = payload.snapshot_bundle_id
+    bundle = load_snapshot_bundle(bundle_id) if bundle_id else None
+    if not bundle:
+        bundles = load_snapshot_bundles()
+        bundle = load_snapshot_bundle(bundles[0]["id"]) if bundles else None
+    if not bundle:
+        raise HTTPException(status_code=400, detail="Create a preview or build snapshot bundle before generating a task packet")
+    return build_task_packet(payload, bundle)
 
 
 @app.get("/api/presets")

@@ -217,3 +217,58 @@ def test_build_adapter_contracts_and_capabilities(tmp_path: Path, monkeypatch) -
     assert "build_task_request" in contracts_json
     assert "normalized_build_result" in contracts_json
     assert "validation_report" in contracts_json
+
+
+def test_build_task_packet_uses_snapshot_bundle(tmp_path: Path, monkeypatch) -> None:
+    source_dir = tmp_path / "docs"
+    source_dir.mkdir()
+    (source_dir / "README.md").write_text("# Demo Vault\n\nA top note.\n", encoding="utf-8")
+
+    client = make_client(tmp_path, monkeypatch)
+    preview = client.post(
+        "/api/preview",
+        json={
+            "config": {
+                "vault_name": "Demo Vault",
+                "output_dir": str(tmp_path / "output"),
+                "default_mode": "copy",
+                "max_file_size_bytes": 5000000,
+                "default_exclude": [],
+                "default_include": [],
+                "access": {
+                    "allowed_roots": [str(source_dir)],
+                    "blocked_paths": [],
+                    "blocked_patterns": [],
+                    "enforce_copy_mode": True,
+                },
+                "sources": [
+                    {
+                        "name": "demo-docs",
+                        "category": "Docs",
+                        "path": str(source_dir),
+                        "include": ["*.md"],
+                        "exclude": [],
+                    }
+                ],
+            },
+            "clean": True,
+        },
+    )
+    assert preview.status_code == 200
+    bundle_id = preview.json()["snapshot_bundle"]["id"]
+
+    packet = client.post(
+        "/api/build-adapters/task-packet",
+        json={
+            "goal": "Generate a governed plan for a docs cleanup pass",
+            "snapshot_bundle_id": bundle_id,
+            "selected_slcs_pieces": ["docs_cleanup_piece"],
+            "response_schema": "plan_json_plus_patch",
+        },
+    )
+    assert packet.status_code == 200
+    packet_json = packet.json()
+    assert packet_json["snapshot_bundle_id"] == bundle_id
+    assert packet_json["selected_slcs_pieces"] == ["docs_cleanup_piece"]
+    assert packet_json["scope"]["file_count"] == 1
+    assert packet_json["policy_bundle"]["access"]["enforce_copy_mode"] is True

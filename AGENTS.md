@@ -76,6 +76,7 @@ Build a cross-platform local app that lets people:
   - `GET /api/snapshot-bundles/{bundle_id}`
   - `GET /api/build-adapters/capabilities`
   - `GET /api/build-adapters/contracts`
+  - `POST /api/build-adapters/task-packet`
   - `GET /api/build-history`
   - `GET /api/jobs`
   - `POST /api/jobs`

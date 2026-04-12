@@ -96,6 +96,16 @@ Turn the earlier Obsidian-style mapping prototype into a real shareable app with
   - local CLI
   - file-handshake
 
+## Phase 11
+
+- added a governed task-packet assembly endpoint
+- Build task packets now draw from:
+  - snapshot bundles
+  - persisted policy bundles
+  - selected SLCS pieces
+  - allowed and forbidden path scope
+- this creates the first real handoff object for future deterministic or model-backed Build adapters
+
 ## Verification
 
 - `python3 -m py_compile` for the shared builder
