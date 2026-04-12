@@ -16,6 +16,7 @@ from context_vault_studio.models import (
     BuildRequest,
     CanvasPayload,
     DeltaSnapshotRequest,
+    ExplainBundleRequest,
     FileCreateRequest,
     FilePreviewRequest,
     FileSaveRequest,
@@ -37,6 +38,7 @@ from context_vault_studio.services.build_adapters import (
 )
 from context_vault_studio.services.build_apply import apply_build_patch_preview
 from context_vault_studio.services.build_patch_gate import create_build_patch_preview
+from context_vault_studio.services.explain_bundle import build_explain_bundle
 from context_vault_studio.services.parallel_scan import build_parallel_scan_profile
 from context_vault_studio.services.incremental_snapshot import build_delta_snapshot
 from context_vault_studio.services.live_monitor import (
@@ -86,6 +88,9 @@ from context_vault_studio.storage import (
     save_workspace_config,
     load_parallel_scan_profiles,
     load_delta_snapshots,
+    load_explain_bundle,
+    load_explain_bundles,
+    load_logic_profile,
     load_logic_profiles,
     upsert_canvas,
     upsert_preset,
@@ -137,6 +142,7 @@ def bootstrap() -> dict:
         "parallel_scan_profiles": load_parallel_scan_profiles()[:20],
         "delta_snapshots": load_delta_snapshots()[:20],
         "logic_profiles": load_logic_profiles()[:20],
+        "explain_bundles": load_explain_bundles()[:20],
         "build_adapter_capabilities": list_build_adapter_capabilities(),
         "canvases": load_canvases(),
         "jobs": list_jobs()[:8],
@@ -221,6 +227,28 @@ def build_adapter_contracts() -> dict:
     return build_adapter_contract_schemas()
 
 
+@app.get("/api/explain/bundles")
+def explain_bundles() -> list[dict]:
+    return load_explain_bundles()
+
+
+@app.get("/api/explain/bundles/{bundle_id}")
+def explain_bundle(bundle_id: str) -> dict:
+    payload = load_explain_bundle(bundle_id)
+    if not payload:
+        raise HTTPException(status_code=404, detail="Explain bundle not found")
+    return payload
+
+
+@app.post("/api/explain/bundles")
+def create_explain_bundle(payload: ExplainBundleRequest) -> dict:
+    snapshot = load_snapshot_bundle(payload.snapshot_bundle_id)
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="Snapshot bundle not found")
+    logic_profile = load_logic_profile(payload.logic_profile_id) if payload.logic_profile_id else None
+    return build_explain_bundle(snapshot, logic_profile)
+
+
 @app.post("/api/build-adapters/task-packet")
 def build_adapter_task_packet(payload: BuildTaskRequest) -> dict:
     bundle_id = payload.snapshot_bundle_id
@@ -230,7 +258,8 @@ def build_adapter_task_packet(payload: BuildTaskRequest) -> dict:
         bundle = load_snapshot_bundle(bundles[0]["id"]) if bundles else None
     if not bundle:
         raise HTTPException(status_code=400, detail="Create a preview or build snapshot bundle before generating a task packet")
-    return build_task_packet(payload, bundle)
+    explain_bundle_payload = load_explain_bundle(payload.explain_bundle_id) if payload.explain_bundle_id else None
+    return build_task_packet(payload, bundle, explain_bundle_payload)
 
 
 @app.post("/api/build-adapters/run")
@@ -242,8 +271,9 @@ def build_adapter_run(payload: BuildTaskRequest) -> dict:
         bundle = load_snapshot_bundle(bundles[0]["id"]) if bundles else None
     if not bundle:
         raise HTTPException(status_code=400, detail="Create a preview or build snapshot bundle before running an adapter")
+    explain_bundle_payload = load_explain_bundle(payload.explain_bundle_id) if payload.explain_bundle_id else None
     try:
-        return run_build_adapter(payload, bundle)
+        return run_build_adapter(payload, bundle, explain_bundle_payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

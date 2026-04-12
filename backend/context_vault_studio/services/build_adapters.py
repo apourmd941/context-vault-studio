@@ -96,7 +96,7 @@ def build_adapter_contract_schemas() -> dict:
     }
 
 
-def build_task_packet(request: BuildTaskRequest, snapshot_bundle: dict) -> dict:
+def build_task_packet(request: BuildTaskRequest, snapshot_bundle: dict, explain_bundle: dict | None = None) -> dict:
     contents = snapshot_bundle.get("contents", {})
     manifest = contents.get("file_manifest") or {}
     policy_bundle = contents.get("policy_bundle") or {}
@@ -132,6 +132,8 @@ def build_task_packet(request: BuildTaskRequest, snapshot_bundle: dict) -> dict:
             "snapshot_kind": snapshot_bundle.get("kind"),
             "snapshot_generated_at": snapshot_meta.get("generated_at"),
             "slcs_status": (contents.get("slcs_context") or {}).get("status", "not_configured"),
+            "explain_bundle_id": explain_bundle.get("id") if explain_bundle else None,
+            "explain_summary": (explain_bundle.get("contents") or {}).get("summary") if explain_bundle else None,
         },
     )
     return packet.model_dump()
@@ -324,8 +326,8 @@ ADAPTERS: dict[str, BuildAdapter] = {
 }
 
 
-def run_build_adapter(request: BuildTaskRequest, snapshot_bundle: dict) -> dict:
-    packet = build_task_packet(request, snapshot_bundle)
+def run_build_adapter(request: BuildTaskRequest, snapshot_bundle: dict, explain_bundle: dict | None = None) -> dict:
+    packet = build_task_packet(request, snapshot_bundle, explain_bundle)
     adapter = ADAPTERS.get(request.adapter_id)
     if adapter is None:
         raise ValueError(f"Unknown adapter: {request.adapter_id}")

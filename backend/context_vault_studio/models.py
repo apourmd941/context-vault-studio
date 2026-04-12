@@ -146,6 +146,7 @@ class FilePreviewRequest(BaseModel):
 class BuildTaskRequest(BaseModel):
     goal: str = Field(..., min_length=1)
     snapshot_bundle_id: str | None = None
+    explain_bundle_id: str | None = None
     selected_files: list[str] = Field(default_factory=list)
     allowed_targets: list[str] = Field(default_factory=list)
     forbidden_paths: list[str] = Field(default_factory=list)
@@ -173,6 +174,11 @@ class LiveMonitorRequest(BaseModel):
 class LogicProfileRequest(BaseModel):
     config: WorkspaceConfig
     max_workers: int = Field(default=4, ge=1, le=16)
+
+
+class ExplainBundleRequest(BaseModel):
+    snapshot_bundle_id: str = Field(..., min_length=1)
+    logic_profile_id: str | None = None
 
 
 class AdapterCapabilities(BaseModel):

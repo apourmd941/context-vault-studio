@@ -34,6 +34,8 @@ DELTA_SNAPSHOTS_PATH = STATE_DIR / "delta_snapshots.json"
 DELTA_SNAPSHOTS_DIR = STATE_DIR / "delta_snapshots"
 LOGIC_PROFILES_PATH = STATE_DIR / "logic_profiles.json"
 LOGIC_PROFILES_DIR = STATE_DIR / "logic_profiles"
+EXPLAIN_BUNDLES_PATH = STATE_DIR / "explain_bundles.json"
+EXPLAIN_BUNDLES_DIR = STATE_DIR / "explain_bundles"
 STARTER_CONFIG_PATH = REPO_ROOT / "configs" / "starter_workspace.json"
 GUIDED_DEMO_CONFIG_PATH = REPO_ROOT / "configs" / "guided_demo.json"
 LOCAL_NEUTRON_EXAMPLE_PATH = REPO_ROOT / "config" / "neutron_curated.example.json"
@@ -528,6 +530,66 @@ def save_logic_profile(payload: dict) -> dict:
             next_records.append(item)
     _write_json(LOGIC_PROFILES_PATH, next_records[:120])
     return record
+
+
+def load_logic_profile(profile_id: str) -> dict | None:
+    record = next((item for item in load_logic_profiles() if item.get("id") == profile_id), None)
+    if not record:
+        return None
+    artifact_file = Path(record["artifacts"]["profile_file"])
+    payload = deepcopy(record)
+    payload["contents"] = {"profile": _read_json(artifact_file)}
+    return payload
+
+
+def load_explain_bundles() -> list[dict]:
+    payload = _read_json(EXPLAIN_BUNDLES_PATH)
+    return payload if isinstance(payload, list) else []
+
+
+def save_explain_bundle(payload: dict) -> dict:
+    ensure_state_dir()
+    EXPLAIN_BUNDLES_DIR.mkdir(parents=True, exist_ok=True)
+
+    bundle_id = payload.get("id") or str(uuid.uuid4())
+    created_at = payload.get("created_at") or _now_iso()
+    bundle_dir = EXPLAIN_BUNDLES_DIR / bundle_id
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+
+    artifact_file = bundle_dir / "explain_bundle.json"
+    artifact_file.write_text(json.dumps(payload.get("bundle", {}), indent=2) + "\n", encoding="utf-8")
+
+    bundle = payload.get("bundle", {})
+    summary = bundle.get("summary", {})
+    record = {
+        "id": bundle_id,
+        "created_at": created_at,
+        "label": payload.get("label") or "Explain bundle",
+        "bundle_dir": str(bundle_dir),
+        "artifacts": {"bundle_file": str(artifact_file)},
+        "snapshot_bundle_id": payload.get("snapshot_bundle_id"),
+        "logic_profile_id": payload.get("logic_profile_id"),
+        "top_file_count": int(summary.get("top_file_count", 0)),
+        "top_symbol_count": int(summary.get("top_symbol_count", 0)),
+    }
+
+    current = load_explain_bundles()
+    next_records = [record]
+    for item in current:
+        if item.get("id") != bundle_id:
+            next_records.append(item)
+    _write_json(EXPLAIN_BUNDLES_PATH, next_records[:120])
+    return record
+
+
+def load_explain_bundle(bundle_id: str) -> dict | None:
+    record = next((item for item in load_explain_bundles() if item.get("id") == bundle_id), None)
+    if not record:
+        return None
+    artifact_file = Path(record["artifacts"]["bundle_file"])
+    payload = deepcopy(record)
+    payload["contents"] = _read_json(artifact_file)
+    return payload
 
 
 def load_bookmarks() -> list[dict]:

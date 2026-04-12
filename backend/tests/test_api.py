@@ -733,3 +733,102 @@ def test_logic_profile_extracts_symbols_and_routes(tmp_path: Path, monkeypatch) 
     assert payload["profile"]["summary"]["symbol_count"] >= 2
     assert payload["profile"]["summary"]["route_count"] >= 1
     assert payload["profile"]["summary"]["storage_touch_count"] >= 1
+
+
+def test_explain_bundle_feeds_into_build_task_packet(tmp_path: Path, monkeypatch) -> None:
+    source_dir = tmp_path / "repo"
+    source_dir.mkdir()
+    (source_dir / "app.py").write_text(
+        "from storage import save_file\n\ndef health():\n    return save_file('x')\n",
+        encoding="utf-8",
+    )
+    (source_dir / "storage.py").write_text("def save_file(path):\n    return path\n", encoding="utf-8")
+
+    client = make_client(tmp_path, monkeypatch)
+    preview = client.post(
+        "/api/preview",
+        json={
+            "config": {
+                "vault_name": "Explain Vault",
+                "output_dir": str(tmp_path / "output"),
+                "default_mode": "copy",
+                "max_file_size_bytes": 5000000,
+                "default_exclude": [],
+                "default_include": [],
+                "access": {
+                    "allowed_roots": [str(source_dir)],
+                    "blocked_paths": [],
+                    "blocked_patterns": [],
+                    "enforce_copy_mode": True,
+                },
+                "sources": [
+                    {
+                        "name": "code",
+                        "category": "Repo",
+                        "path": str(source_dir),
+                        "include": ["*.py"],
+                        "exclude": [],
+                    }
+                ],
+            },
+            "clean": True,
+        },
+    )
+    assert preview.status_code == 200
+    snapshot_bundle_id = preview.json()["snapshot_bundle"]["id"]
+
+    logic = client.post(
+        "/api/logic/profile",
+        json={
+            "config": {
+                "vault_name": "Explain Vault",
+                "output_dir": str(tmp_path / "output"),
+                "default_mode": "copy",
+                "max_file_size_bytes": 5000000,
+                "default_exclude": [],
+                "default_include": [],
+                "access": {
+                    "allowed_roots": [str(source_dir)],
+                    "blocked_paths": [],
+                    "blocked_patterns": [],
+                    "enforce_copy_mode": True,
+                },
+                "sources": [
+                    {
+                        "name": "code",
+                        "category": "Repo",
+                        "path": str(source_dir),
+                        "include": ["*.py"],
+                        "exclude": [],
+                    }
+                ],
+            },
+            "max_workers": 2,
+        },
+    )
+    assert logic.status_code == 200
+    logic_profile_id = logic.json()["record"]["id"]
+
+    explain = client.post(
+        "/api/explain/bundles",
+        json={
+            "snapshot_bundle_id": snapshot_bundle_id,
+            "logic_profile_id": logic_profile_id,
+        },
+    )
+    assert explain.status_code == 200
+    explain_bundle_id = explain.json()["record"]["id"]
+
+    packet = client.post(
+        "/api/build-adapters/task-packet",
+        json={
+            "goal": "Use explain context in build planning",
+            "snapshot_bundle_id": snapshot_bundle_id,
+            "explain_bundle_id": explain_bundle_id,
+            "selected_slcs_pieces": ["service_split_piece"],
+        },
+    )
+    assert packet.status_code == 200
+    packet_json = packet.json()
+    assert packet_json["metadata"]["explain_bundle_id"] == explain_bundle_id
+    assert packet_json["metadata"]["explain_summary"]["top_file_count"] >= 1

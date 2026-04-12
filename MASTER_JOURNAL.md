@@ -189,6 +189,17 @@ Turn the earlier Obsidian-style mapping prototype into a real shareable app with
   - storage hints
 - this is the first real semantic-linking layer for code-oriented Structure / Explain / Build follow-on work
 
+## Phase 20
+
+- added persisted Explain bundles
+- Explain bundles now combine:
+  - snapshot architecture summary
+  - top files
+  - top symbols
+  - feature clusters
+  - logic summary
+- Build task packets can now carry an explain bundle reference and explain summary metadata
+
 ## Verification
 
 - `python3 -m py_compile` for the shared builder
