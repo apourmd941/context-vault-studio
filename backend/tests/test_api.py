@@ -446,3 +446,69 @@ def test_patch_gate_creates_preview_and_validation_artifacts(tmp_path: Path, mon
     detail_json = detail.json()
     assert detail_json["contents"]["patch_bundle"]["file_actions"]
     assert detail_json["contents"]["validation_report"]["status"] in {"pass", "warning", "fail"}
+
+
+def test_apply_preview_creates_scratch_run_and_reconciliation(tmp_path: Path, monkeypatch) -> None:
+    source_dir = tmp_path / "docs"
+    source_dir.mkdir()
+    (source_dir / "README.md").write_text("# Demo Vault\n\nA top note.\n", encoding="utf-8")
+
+    client = make_client(tmp_path, monkeypatch)
+    preview = client.post(
+        "/api/preview",
+        json={
+            "config": {
+                "vault_name": "Demo Vault",
+                "output_dir": str(tmp_path / "output"),
+                "default_mode": "copy",
+                "max_file_size_bytes": 5000000,
+                "default_exclude": [],
+                "default_include": [],
+                "access": {
+                    "allowed_roots": [str(source_dir)],
+                    "blocked_paths": [],
+                    "blocked_patterns": [],
+                    "enforce_copy_mode": True,
+                },
+                "sources": [
+                    {
+                        "name": "demo-docs",
+                        "category": "Docs",
+                        "path": str(source_dir),
+                        "include": ["*.md"],
+                        "exclude": [],
+                    }
+                ],
+            },
+            "clean": True,
+        },
+    )
+    assert preview.status_code == 200
+    bundle_id = preview.json()["snapshot_bundle"]["id"]
+
+    patch_gate = client.post(
+        "/api/build-adapters/patch-gate",
+        json={
+            "goal": "Create a deterministic docs cleanup plan",
+            "snapshot_bundle_id": bundle_id,
+            "adapter_id": "deterministic",
+            "selected_slcs_pieces": ["docs_cleanup_piece"],
+            "selected_files": ["README.md"],
+        },
+    )
+    assert patch_gate.status_code == 200
+    preview_id = patch_gate.json()["id"]
+
+    apply_run = client.post(f"/api/build-adapters/apply-preview/{preview_id}")
+    assert apply_run.status_code == 200
+    apply_json = apply_run.json()
+    assert Path(apply_json["artifacts"]["reconciliation_report_file"]).exists()
+    assert Path(apply_json["rollback_dir"]).exists()
+    assert Path(apply_json["scratch_apply_dir"]).exists()
+    assert apply_json["reconciliation_report"]["changed_files"]
+
+    detail = client.get(f"/api/build-adapters/apply-runs/{apply_json['id']}")
+    assert detail.status_code == 200
+    detail_json = detail.json()
+    assert detail_json["contents"]["apply_summary"]["changed_file_count"] >= 1
+    assert detail_json["contents"]["reconciliation_report"]["after_snapshot_id"]

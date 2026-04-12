@@ -31,6 +31,7 @@ from context_vault_studio.services.build_adapters import (
     list_build_adapter_capabilities,
     run_build_adapter,
 )
+from context_vault_studio.services.build_apply import apply_build_patch_preview
 from context_vault_studio.services.build_patch_gate import create_build_patch_preview
 from context_vault_studio.services.workspace_builder import (
     build_workspace_from_config,
@@ -65,6 +66,8 @@ from context_vault_studio.storage import (
     load_workspace_config,
     load_build_patch_preview,
     load_build_patch_previews,
+    load_build_apply_run,
+    load_build_apply_runs,
     save_layout,
     save_last_result,
     save_workspace_config,
@@ -114,6 +117,7 @@ def bootstrap() -> dict:
         "snapshots": load_snapshots()[:20],
         "snapshot_bundles": load_snapshot_bundles()[:20],
         "build_patch_previews": load_build_patch_previews()[:20],
+        "build_apply_runs": load_build_apply_runs()[:20],
         "build_adapter_capabilities": list_build_adapter_capabilities(),
         "canvases": load_canvases(),
         "jobs": list_jobs()[:8],
@@ -252,6 +256,27 @@ def build_adapter_patch_gate(payload: BuildTaskRequest) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return create_build_patch_preview(bundle, adapter_run)
+
+
+@app.get("/api/build-adapters/apply-runs")
+def build_apply_runs() -> list[dict]:
+    return load_build_apply_runs()
+
+
+@app.get("/api/build-adapters/apply-runs/{run_id}")
+def build_apply_run(run_id: str) -> dict:
+    payload = load_build_apply_run(run_id)
+    if not payload:
+        raise HTTPException(status_code=404, detail="Build apply run not found")
+    return payload
+
+
+@app.post("/api/build-adapters/apply-preview/{preview_id}")
+def build_apply_preview(preview_id: str) -> dict:
+    preview = load_build_patch_preview(preview_id)
+    if not preview:
+        raise HTTPException(status_code=404, detail="Build patch preview not found")
+    return apply_build_patch_preview(preview)
 
 
 @app.get("/api/presets")

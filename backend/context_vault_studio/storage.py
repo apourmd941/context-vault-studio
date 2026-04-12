@@ -26,6 +26,8 @@ SNAPSHOT_BUNDLES_PATH = STATE_DIR / "snapshot_bundles.json"
 SNAPSHOT_BUNDLES_DIR = STATE_DIR / "snapshot_bundles"
 BUILD_PATCH_PREVIEWS_PATH = STATE_DIR / "build_patch_previews.json"
 BUILD_PATCH_PREVIEWS_DIR = STATE_DIR / "build_patch_previews"
+BUILD_APPLY_RUNS_PATH = STATE_DIR / "build_apply_runs.json"
+BUILD_APPLY_RUNS_DIR = STATE_DIR / "build_apply_runs"
 STARTER_CONFIG_PATH = REPO_ROOT / "configs" / "starter_workspace.json"
 GUIDED_DEMO_CONFIG_PATH = REPO_ROOT / "configs" / "guided_demo.json"
 LOCAL_NEUTRON_EXAMPLE_PATH = REPO_ROOT / "config" / "neutron_curated.example.json"
@@ -342,6 +344,67 @@ def load_build_patch_preview(preview_id: str) -> dict | None:
         "normalized_result": _read_json(Path(artifacts["normalized_result_file"])),
         "patch_bundle": _read_json(Path(artifacts["patch_bundle_file"])),
         "validation_report": _read_json(Path(artifacts["validation_report_file"])),
+    }
+    return payload
+
+
+def load_build_apply_runs() -> list[dict]:
+    payload = _read_json(BUILD_APPLY_RUNS_PATH)
+    return payload if isinstance(payload, list) else []
+
+
+def save_build_apply_run(payload: dict) -> dict:
+    ensure_state_dir()
+    BUILD_APPLY_RUNS_DIR.mkdir(parents=True, exist_ok=True)
+
+    run_id = payload.get("id") or str(uuid.uuid4())
+    created_at = payload.get("created_at") or _now_iso()
+    run_dir = BUILD_APPLY_RUNS_DIR / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    artifact_paths = {
+        "reconciliation_report_file": run_dir / "reconciliation_report.json",
+        "apply_summary_file": run_dir / "apply_summary.json",
+    }
+
+    artifact_paths["reconciliation_report_file"].write_text(
+        json.dumps(payload.get("reconciliation_report", {}), indent=2) + "\n",
+        encoding="utf-8",
+    )
+    artifact_paths["apply_summary_file"].write_text(
+        json.dumps(payload.get("apply_summary", {}), indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    record = {
+        "id": run_id,
+        "created_at": created_at,
+        "label": payload.get("label") or "Build apply run",
+        "run_dir": str(run_dir),
+        "artifacts": {key: str(value) for key, value in artifact_paths.items()},
+        "preview_id": payload.get("preview_id"),
+        "rollback_dir": payload.get("rollback_dir"),
+        "scratch_apply_dir": payload.get("scratch_apply_dir"),
+    }
+
+    current = load_build_apply_runs()
+    next_records = [record]
+    for item in current:
+        if item.get("id") != run_id:
+            next_records.append(item)
+    _write_json(BUILD_APPLY_RUNS_PATH, next_records[:120])
+    return record
+
+
+def load_build_apply_run(run_id: str) -> dict | None:
+    record = next((item for item in load_build_apply_runs() if item.get("id") == run_id), None)
+    if not record:
+        return None
+    artifacts = record.get("artifacts", {})
+    payload = deepcopy(record)
+    payload["contents"] = {
+        "reconciliation_report": _read_json(Path(artifacts["reconciliation_report_file"])),
+        "apply_summary": _read_json(Path(artifacts["apply_summary_file"])),
     }
     return payload
 

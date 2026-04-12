@@ -141,6 +141,17 @@ Turn the earlier Obsidian-style mapping prototype into a real shareable app with
   - a validation report artifact
 - the gate validates file actions against selected scope, allowed targets, and forbidden paths before anything is considered apply-ready
 
+## Phase 15
+
+- added scratch apply runs for patch previews
+- apply now happens only inside scratch space, not the main repo
+- each apply run now persists:
+  - reconciliation report
+  - apply summary
+  - rollback directory
+  - scratch apply directory
+- after scratch apply, the app rescans the scratch workspace and records before/after notes as the first reconciliation loop
+
 ## Verification
 
 - `python3 -m py_compile` for the shared builder

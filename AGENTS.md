@@ -82,6 +82,9 @@ Build a cross-platform local app that lets people:
   - `GET /api/build-adapters/patch-previews`
   - `GET /api/build-adapters/patch-previews/{preview_id}`
   - `POST /api/build-adapters/patch-gate`
+  - `GET /api/build-adapters/apply-runs`
+  - `GET /api/build-adapters/apply-runs/{run_id}`
+  - `POST /api/build-adapters/apply-preview/{preview_id}`
   - `GET /api/build-history`
   - `GET /api/jobs`
   - `POST /api/jobs`
