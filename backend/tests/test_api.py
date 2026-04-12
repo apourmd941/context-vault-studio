@@ -327,3 +327,60 @@ def test_build_adapter_run_returns_normalized_stub_result(tmp_path: Path, monkey
     assert run_json["adapter_capabilities"]["adapter_id"] == "local_cli"
     assert run_json["normalized_result"]["adapter_id"] == "local_cli"
     assert run_json["normalized_result"]["status"] == "needs_revision"
+
+
+def test_deterministic_adapter_generates_manifest_and_actions(tmp_path: Path, monkeypatch) -> None:
+    source_dir = tmp_path / "docs"
+    source_dir.mkdir()
+    (source_dir / "README.md").write_text("# Demo Vault\n\nA top note.\n", encoding="utf-8")
+
+    client = make_client(tmp_path, monkeypatch)
+    preview = client.post(
+        "/api/preview",
+        json={
+            "config": {
+                "vault_name": "Demo Vault",
+                "output_dir": str(tmp_path / "output"),
+                "default_mode": "copy",
+                "max_file_size_bytes": 5000000,
+                "default_exclude": [],
+                "default_include": [],
+                "access": {
+                    "allowed_roots": [str(source_dir)],
+                    "blocked_paths": [],
+                    "blocked_patterns": [],
+                    "enforce_copy_mode": True,
+                },
+                "sources": [
+                    {
+                        "name": "demo-docs",
+                        "category": "Docs",
+                        "path": str(source_dir),
+                        "include": ["*.md"],
+                        "exclude": [],
+                    }
+                ],
+            },
+            "clean": True,
+        },
+    )
+    assert preview.status_code == 200
+    bundle_id = preview.json()["snapshot_bundle"]["id"]
+
+    run_result = client.post(
+        "/api/build-adapters/run",
+        json={
+            "goal": "Create a deterministic docs cleanup plan",
+            "snapshot_bundle_id": bundle_id,
+            "adapter_id": "deterministic",
+            "selected_slcs_pieces": ["docs_cleanup_piece", "summary_validator_piece"],
+        },
+    )
+    assert run_result.status_code == 200
+    run_json = run_result.json()
+    normalized = run_json["normalized_result"]
+    assert normalized["adapter_id"] == "deterministic"
+    assert normalized["status"] == "ok"
+    assert normalized["file_actions"]
+    assert normalized["artifacts"]["deterministic_manifest"]["entries"]
+    assert normalized["plan"]["selected_piece_count"] == 2

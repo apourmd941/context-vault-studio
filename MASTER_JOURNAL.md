@@ -121,6 +121,16 @@ Turn the earlier Obsidian-style mapping prototype into a real shareable app with
   - a normalized result object
 - current non-deterministic adapters are still informational stubs, but they now conform to the same execution interface
 
+## Phase 13
+
+- replaced the deterministic adapter stub with a real no-model planning path
+- deterministic Build now produces:
+  - a scoped plan
+  - file actions
+  - patch previews
+  - a deterministic manifest artifact
+- this gives the repo its first token-free governed Build flow based only on snapshot scope, policy, and selected pieces
+
 ## Verification
 
 - `python3 -m py_compile` for the shared builder

@@ -51,6 +51,7 @@ Build a cross-platform local app that lets people:
   - basic-first vault home
   - advanced source editing
   - guided demo loading
+  - deterministic snapshot-driven Build foundations in the backend
   - explorer and quick switcher
   - note preview
   - note editing and creation

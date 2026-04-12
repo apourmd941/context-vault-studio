@@ -205,6 +205,7 @@ class NormalizedBuildResult(BaseModel):
     plan: dict = Field(default_factory=dict)
     file_actions: list[dict] = Field(default_factory=list)
     patches: list[dict] = Field(default_factory=list)
+    artifacts: dict = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
     raw_output_ref: str | None = None
     validation: ValidationReport = Field(default_factory=ValidationReport)

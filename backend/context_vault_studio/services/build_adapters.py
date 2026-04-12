@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
 from context_vault_studio.models import (
@@ -190,8 +191,132 @@ class InformationalAdapter(_BaseAdapter):
         ).model_dump()
 
 
+def _slugify_piece(value: str) -> str:
+    cleaned = "".join(ch.lower() if ch.isalnum() else "-" for ch in value).strip("-")
+    while "--" in cleaned:
+        cleaned = cleaned.replace("--", "-")
+    return cleaned or "piece"
+
+
+def _suggest_extension(piece_name: str, selected_files: list[str]) -> str:
+    lowered = piece_name.lower()
+    if "route" in lowered or "service" in lowered or "validator" in lowered:
+        return ".py"
+    if "component" in lowered or "ui" in lowered:
+        return ".tsx"
+    if "config" in lowered:
+        return ".json"
+    if selected_files:
+        extension = Path(selected_files[0]).suffix
+        if extension:
+            return extension
+    return ".md"
+
+
+class DeterministicAdapter(_BaseAdapter):
+    def run(self, packet: dict, snapshot_bundle: dict) -> dict:
+        scope = packet.get("scope", {})
+        policy_bundle = packet.get("policy_bundle", {})
+        selected_files = scope.get("selected_files", [])
+        allowed_targets = scope.get("allowed_targets", [])
+        selected_pieces = packet.get("selected_slcs_pieces", [])
+        chosen_target = allowed_targets[0] if allowed_targets else "generated/"
+
+        file_actions: list[dict] = []
+        patches: list[dict] = []
+        manifest_entries: list[dict] = []
+        steps: list[str] = []
+        findings: list[dict] = []
+        warnings: list[str] = []
+
+        if not selected_pieces:
+            findings.append(
+                {
+                    "severity": "warning",
+                    "code": "no_selected_pieces",
+                    "message": "No SLCS pieces were selected, so the deterministic plan is a scoped review only.",
+                }
+            )
+            warnings.append("No SLCS pieces were selected; generated output is intentionally minimal.")
+
+        for piece_name in selected_pieces or ["scoped_review_piece"]:
+            piece_slug = _slugify_piece(piece_name.replace("_piece", ""))
+            extension = _suggest_extension(piece_name, selected_files)
+            proposed_path = str(Path(chosen_target) / f"{piece_slug}{extension}")
+            action = "modify" if selected_files else "create"
+            target_path = selected_files[0] if action == "modify" else proposed_path
+
+            steps.append(f"Use `{piece_name}` to produce a deterministic scoped change for `{target_path}`.")
+            file_actions.append(
+                {
+                    "action": action,
+                    "path": target_path,
+                    "piece": piece_name,
+                    "reason": packet.get("goal"),
+                }
+            )
+            patches.append(
+                {
+                    "path": target_path,
+                    "piece": piece_name,
+                    "preview": f"Deterministic template for {piece_name} based on goal: {packet.get('goal')}",
+                }
+            )
+            manifest_entries.append(
+                {
+                    "piece": piece_name,
+                    "target_path": target_path,
+                    "action": action,
+                }
+            )
+
+        if not allowed_targets:
+            findings.append(
+                {
+                    "severity": "warning",
+                    "code": "no_allowed_targets",
+                    "message": "No explicit allowed target paths were supplied; the deterministic plan used a generated placeholder location.",
+                }
+            )
+            warnings.append("Allowed targets were empty, so placeholder generated paths were used.")
+
+        validation_status = "warning" if findings else "pass"
+
+        return NormalizedBuildResult(
+            request_id=packet["request_id"],
+            adapter_id=self.adapter_id,
+            status="ok",
+            plan={
+                "summary": f"Deterministic no-model build plan for {len(manifest_entries)} planned action(s).",
+                "steps": steps or ["Review the scoped snapshot bundle before applying changes."],
+                "goal": packet.get("goal"),
+                "selected_piece_count": len(selected_pieces),
+                "scope_summary": {
+                    "file_count": scope.get("file_count", 0),
+                    "source_count": scope.get("source_count", 0),
+                },
+            },
+            file_actions=file_actions,
+            patches=patches,
+            artifacts={
+                "deterministic_manifest": {
+                    "request_id": packet["request_id"],
+                    "selected_pieces": selected_pieces,
+                    "entries": manifest_entries,
+                    "policy_bundle": policy_bundle,
+                }
+            },
+            warnings=warnings,
+            raw_output_ref=f"adapter://{self.adapter_id}/deterministic-manifest/{packet['request_id']}",
+            validation=ValidationReport(
+                status=validation_status,
+                findings=findings,
+            ),
+        ).model_dump()
+
+
 ADAPTERS: dict[str, BuildAdapter] = {
-    "deterministic": InformationalAdapter(adapter_id="deterministic"),
+    "deterministic": DeterministicAdapter(adapter_id="deterministic"),
     "cloud_api": InformationalAdapter(adapter_id="cloud_api"),
     "local_server": InformationalAdapter(adapter_id="local_server"),
     "local_cli": InformationalAdapter(adapter_id="local_cli"),
