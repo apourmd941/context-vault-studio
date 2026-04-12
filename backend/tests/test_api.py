@@ -200,3 +200,20 @@ def test_bootstrap_includes_guided_demo_example(tmp_path: Path, monkeypatch) -> 
     labels = [example["label"] for example in payload["examples"]]
     assert "Guided Demo" in labels
     assert payload["config"]["sources"]
+
+
+def test_build_adapter_contracts_and_capabilities(tmp_path: Path, monkeypatch) -> None:
+    client = make_client(tmp_path, monkeypatch)
+
+    capabilities = client.get("/api/build-adapters/capabilities")
+    assert capabilities.status_code == 200
+    capabilities_json = capabilities.json()
+    adapter_ids = {item["adapter_id"] for item in capabilities_json}
+    assert {"deterministic", "cloud_api", "local_server", "local_cli", "file_handshake"} <= adapter_ids
+
+    contracts = client.get("/api/build-adapters/contracts")
+    assert contracts.status_code == 200
+    contracts_json = contracts.json()
+    assert "build_task_request" in contracts_json
+    assert "normalized_build_result" in contracts_json
+    assert "validation_report" in contracts_json

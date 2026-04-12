@@ -24,6 +24,10 @@ from context_vault_studio.models import (
     SnapshotRestorePayload,
     WorkspaceConfig,
 )
+from context_vault_studio.services.build_adapters import (
+    build_adapter_contract_schemas,
+    list_build_adapter_capabilities,
+)
 from context_vault_studio.services.workspace_builder import (
     build_workspace_from_config,
     evaluate_path_access,
@@ -103,6 +107,7 @@ def bootstrap() -> dict:
         "layout": load_layout(),
         "snapshots": load_snapshots()[:20],
         "snapshot_bundles": load_snapshot_bundles()[:20],
+        "build_adapter_capabilities": list_build_adapter_capabilities(),
         "canvases": load_canvases(),
         "jobs": list_jobs()[:8],
         "last_result": load_last_result(),
@@ -174,6 +179,16 @@ def snapshot_bundle(bundle_id: str) -> dict:
     if not payload:
         raise HTTPException(status_code=404, detail="Snapshot bundle not found")
     return payload
+
+
+@app.get("/api/build-adapters/capabilities")
+def build_adapter_capabilities() -> list[dict]:
+    return list_build_adapter_capabilities()
+
+
+@app.get("/api/build-adapters/contracts")
+def build_adapter_contracts() -> dict:
+    return build_adapter_contract_schemas()
 
 
 @app.get("/api/presets")

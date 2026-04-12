@@ -29,6 +29,7 @@ Instead of pointing Claude or Codex at a giant parent folder, you define a tight
 - exports `context_graph.json` and `manifest.json`
 - persists reusable snapshot bundles with manifest, edge, cluster, policy, and architecture artifacts
 - renders an Obsidian-style local graph in the UI
+- exposes formal Build adapter contracts and capability metadata for future governed Build work
 - supports explorer, quick switcher, note preview, backlinks, and outgoing links
 - runs preview and build work as background jobs with persisted history
 - supports bookmarks, canvas boards, note editing, snapshots, and shareable export bundles

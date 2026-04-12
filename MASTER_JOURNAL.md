@@ -79,6 +79,23 @@ Turn the earlier Obsidian-style mapping prototype into a real shareable app with
 - exposed snapshot bundles through bootstrap and dedicated API endpoints
 - surfaced the current snapshot bundle in the Vault result spotlight so future Explain / Build phases have a concrete handoff artifact
 
+## Phase 10
+
+- added formal Build adapter contract models for:
+  - Build task requests
+  - adapter capabilities
+  - backend task packets
+  - normalized build results
+  - validation reports
+  - reconciliation reports
+- exposed adapter capabilities and contract schemas through API endpoints
+- recorded the first adapter family as governed foundations:
+  - deterministic
+  - cloud API
+  - local server
+  - local CLI
+  - file-handshake
+
 ## Verification
 
 - `python3 -m py_compile` for the shared builder
