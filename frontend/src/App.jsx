@@ -1504,11 +1504,6 @@ export default function App() {
 
   const structureActions = (
     <>
-      {guidedDemo ? (
-        <button className="secondary-button" type="button" onClick={() => handleLoadExample(guidedDemo, true)} disabled={!!busy}>
-          Load demo
-        </button>
-      ) : null}
       <button className="secondary-button" type="button" onClick={addSource} disabled={!!busy}>
         Add source
       </button>
@@ -1574,46 +1569,30 @@ export default function App() {
           </div>
         </div>
 
-        <div className="sidebar__panel">
-          <span className="eyebrow">Current lane</span>
-          <h3>{LANE_COPY[mainTab].eyebrow}</h3>
-          <p className="sidebar-copy">{LANE_COPY[mainTab].description}</p>
-        </div>
-
         {mainTab === "structure" ? (
           <>
             {structureTab === "setup" ? (
-              <>
-                <div className="sidebar__panel">
-                  <div className="panel__header">
-                    <div>
-                      <span className="eyebrow">Templates</span>
-                      <h3>Start with something that works</h3>
-                    </div>
-                  </div>
-                  <div className="example-stack">
-                    {examples.map((example) => (
-                      <button
-                        key={example.id}
-                        className="example-card"
-                        type="button"
-                        onClick={() => handleLoadExample(example, example.id === "guided-demo")}
-                      >
-                        <strong>{example.label}</strong>
-                        <span>{example.description}</span>
-                      </button>
-                    ))}
+              <div className="sidebar__panel">
+                <div className="panel__header">
+                  <div>
+                    <span className="eyebrow">Templates</span>
+                    <h3>Start with something that works</h3>
                   </div>
                 </div>
-                <div className="sidebar__panel">
-                  <span className="eyebrow">Setup guidance</span>
-                  <ul className="sidebar-list">
-                    <li>Choose the source folders the app is allowed to map.</li>
-                    <li>Preview before you build.</li>
-                    <li>Use `Advanced` only for lower-level controls and saved layouts.</li>
-                  </ul>
+                <div className="example-stack">
+                  {examples.map((example) => (
+                    <button
+                      key={example.id}
+                      className="example-card"
+                      type="button"
+                      onClick={() => handleLoadExample(example, example.id === "guided-demo")}
+                    >
+                      <strong>{example.label}</strong>
+                      <span>{example.description}</span>
+                    </button>
+                  ))}
                 </div>
-              </>
+              </div>
             ) : null}
             {structureTab === "notes" ? (
               <>
@@ -1766,51 +1745,26 @@ export default function App() {
         {mainTab === "structure" && structureTab === "setup" ? (
           <>
             <LaneHeader lane="structure" actions={structureActions} />
-            <section className="vault-home-grid">
-              <div className="vault-home-side">
-                <ResultSpotlight
-                  result={activeResult}
-                  outputDir={buildResult?.artifacts?.vault_dir}
-                  snapshotBundle={activeResult?.snapshot_bundle || snapshotBundles[0]}
-                  onOpenNotes={() => openStructureTab("notes")}
-                  onOpenGraph={() => openStructureTab("graph")}
-                />
-
-                <section className="panel">
-                  <div className="panel__header">
-                    <div>
-                      <span className="eyebrow">At a glance</span>
-                      <h3>Current structure state</h3>
-                    </div>
-                  </div>
-                  <div className="metrics-grid">
-                    <MetricCard label="Sources" value={hasSources ? deferredSources.length : 0} hint="Folders in scope" />
-                    <MetricCard label="Files" value={activeResult?.summary?.file_count ?? "—"} hint="Matched on preview/build" />
-                    <MetricCard label="Edges" value={activeResult?.summary?.edge_count ?? "—"} hint="Graph relationships" />
-                    <MetricCard label="Blocked rules" value={blockedRuleCount} hint="Paths and patterns denied" />
-                  </div>
-                  {recentFiles.length ? (
-                    <ul className="compact-list compact-list--tight">
-                      {recentFiles.map((file) => (
-                        <li key={file.id}>
-                          <strong>{file.label}</strong>
-                          <span>{file.source_name}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
-                </section>
-              </div>
-
-              <div className="vault-home-main">
-                <QuickStartPanel
-                  demoExample={guidedDemo}
-                  onLoadDemo={() => handleLoadExample(guidedDemo, true)}
-                  onAddSource={addSource}
-                  onRunPreview={() => startWorkspaceJob("preview")}
-                  hasSources={deferredSources.length}
-                  activeResult={activeResult}
-                />
+            <section className="structure-setup-grid">
+              <div className="structure-setup-main">
+                {activeResult ? (
+                  <ResultSpotlight
+                    result={activeResult}
+                    outputDir={buildResult?.artifacts?.vault_dir}
+                    snapshotBundle={activeResult?.snapshot_bundle || snapshotBundles[0]}
+                    onOpenNotes={() => openStructureTab("notes")}
+                    onOpenGraph={() => openStructureTab("graph")}
+                  />
+                ) : (
+                  <EmptyTabState
+                    title="No workspace result yet"
+                    body="Load the guided demo from Templates or add a source, then preview to populate Structure."
+                    actions={[
+                      guidedDemo ? { label: "Load guided demo", onClick: () => handleLoadExample(guidedDemo, true), primary: true } : null,
+                      { label: "Run preview", onClick: () => startWorkspaceJob("preview") },
+                    ].filter(Boolean)}
+                  />
+                )}
                 <section className="panel">
                   <div className="panel__header panel__header--spread">
                     <div>
@@ -1820,9 +1774,6 @@ export default function App() {
                     <div className="hero__actions hero__actions--tight">
                       <button className="primary-button" type="button" onClick={addSource}>
                         Add source
-                      </button>
-                      <button className="secondary-button" type="button" onClick={handleCreateNote}>
-                        New note
                       </button>
                       <button className="ghost-button" type="button" onClick={() => openStructureTab("advanced")}>
                         Advanced
@@ -1861,13 +1812,18 @@ export default function App() {
                     />
                   )}
                 </section>
+              </div>
 
+              <div className="structure-setup-side">
                 <section className="panel">
-                  <div className="panel__header">
+                  <div className="panel__header panel__header--spread">
                     <div>
-                      <span className="eyebrow">Settings</span>
-                      <h3>Set the output location, rules, and sandbox boundaries</h3>
+                      <span className="eyebrow">Sandbox</span>
+                      <h3>Output folder and exclusion rules</h3>
                     </div>
+                    <button className="secondary-button" type="button" onClick={handleCreateNote}>
+                      New note
+                    </button>
                   </div>
                   <div className="field-grid">
                     <label>
@@ -1935,14 +1891,14 @@ export default function App() {
                       />
                     </label>
                   </div>
-                    <label className="checkbox-field">
-                      <input
-                        type="checkbox"
-                        checked={config.access.enforce_copy_mode}
-                        onChange={(event) => updateAccessField("enforce_copy_mode", event.target.checked)}
-                      />
-                      <span>Force copy-only builds so the generated vault becomes the hard curated boundary.</span>
-                    </label>
+                  <label className="checkbox-field">
+                    <input
+                      type="checkbox"
+                      checked={config.access.enforce_copy_mode}
+                      onChange={(event) => updateAccessField("enforce_copy_mode", event.target.checked)}
+                    />
+                    <span>Force copy-only builds so the generated vault becomes the hard curated boundary.</span>
+                  </label>
                   <div className="hero__actions hero__actions--tight">
                     <button className="secondary-button" type="button" onClick={handleSave} disabled={!!busy}>
                       {busy === "save" ? "Saving..." : "Save settings"}

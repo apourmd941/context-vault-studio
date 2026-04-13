@@ -487,6 +487,12 @@ code,
   gap: 18px;
 }
 
+.structure-setup-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(360px, 0.9fr);
+  gap: 18px;
+}
+
 .vault-home-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.9fr);
@@ -506,7 +512,9 @@ code,
 }
 
 .vault-layout__main,
-.vault-layout__side {
+.vault-layout__side,
+.structure-setup-main,
+.structure-setup-side {
   display: grid;
   gap: 18px;
 }
@@ -1254,6 +1262,7 @@ select:focus {
   .notes-grid,
   .vault-home-grid,
   .vault-layout,
+  .structure-setup-grid,
   .quickstart-grid,
   .result-summary,
   .view-header {

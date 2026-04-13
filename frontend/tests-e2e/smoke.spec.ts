@@ -4,7 +4,7 @@ test("v2 shell renders the main lanes", async ({ page }) => {
   await page.goto("/");
 
   await expect(page.getByText("Context Vault Studio")).toBeVisible();
-  await expect(page.getByText("Load guided demo")).toBeVisible();
+  await expect(page.locator(".example-card").first()).toBeVisible();
   const laneTabs = page.locator(".window-tabs");
   await expect(laneTabs.getByRole("button", { name: "Structure" })).toBeVisible();
   await expect(laneTabs.getByRole("button", { name: "Logic" })).toBeVisible();
