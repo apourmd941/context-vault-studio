@@ -289,6 +289,28 @@ code,
   color: var(--ink);
 }
 
+.workspace-header {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.window-tab--structure.window-tab--active {
+  background: rgba(124, 230, 211, 0.16);
+}
+
+.window-tab--logic.window-tab--active {
+  background: rgba(246, 193, 119, 0.16);
+}
+
+.window-tab--explain.window-tab--active {
+  background: rgba(120, 180, 255, 0.16);
+}
+
+.window-tab--build.window-tab--active {
+  background: rgba(255, 143, 143, 0.16);
+}
+
 .hero {
   display: flex;
   justify-content: space-between;
@@ -315,27 +337,27 @@ code,
   box-shadow: var(--shadow);
 }
 
-.view-header--vault {
+.view-header--structure {
   background:
     radial-gradient(circle at top right, rgba(124, 230, 211, 0.12), transparent 24%),
     linear-gradient(180deg, rgba(19, 22, 30, 0.94), rgba(12, 15, 21, 0.96));
 }
 
-.view-header--notes {
+.view-header--logic {
   background:
-    radial-gradient(circle at top right, rgba(155, 140, 255, 0.14), transparent 28%),
+    radial-gradient(circle at top right, rgba(246, 193, 119, 0.14), transparent 28%),
     linear-gradient(180deg, rgba(19, 22, 30, 0.94), rgba(12, 15, 21, 0.96));
 }
 
-.view-header--canvas {
+.view-header--explain {
   background:
-    radial-gradient(circle at top right, rgba(246, 193, 119, 0.12), transparent 24%),
+    radial-gradient(circle at top right, rgba(120, 180, 255, 0.14), transparent 24%),
     linear-gradient(180deg, rgba(19, 22, 30, 0.94), rgba(12, 15, 21, 0.96));
 }
 
-.view-header--graph {
+.view-header--build {
   background:
-    radial-gradient(circle at top right, rgba(124, 230, 211, 0.12), transparent 24%),
+    radial-gradient(circle at top right, rgba(255, 143, 143, 0.14), transparent 24%),
     linear-gradient(180deg, rgba(19, 22, 30, 0.94), rgba(12, 15, 21, 0.96));
 }
 
@@ -362,6 +384,27 @@ code,
   justify-content: flex-end;
   gap: 10px;
   min-width: 240px;
+}
+
+.subtab-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.subtab-chip {
+  padding: 9px 14px;
+  border: 1px solid rgba(155, 140, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(18, 21, 29, 0.72);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.subtab-chip--active {
+  background: rgba(155, 140, 255, 0.16);
+  color: var(--ink);
+  border-color: rgba(155, 140, 255, 0.22);
 }
 
 .quickstart-panel {
@@ -455,6 +498,11 @@ code,
   display: grid;
   gap: 18px;
   align-content: start;
+}
+
+.vault-home-main {
+  display: grid;
+  gap: 18px;
 }
 
 .vault-layout__main,

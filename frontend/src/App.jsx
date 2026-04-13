@@ -55,30 +55,65 @@ const EMPTY_SOURCE = {
   max_file_size_bytes: "",
 };
 
-const TAB_COPY = {
-  vault: {
-    eyebrow: "Vault builder",
-    title: "Pick the exact folders and notes the model should be allowed to use.",
+const MAIN_TABS = [
+  { id: "structure", label: "Structure" },
+  { id: "logic", label: "Logic" },
+  { id: "explain", label: "Explain" },
+  { id: "build", label: "Build" },
+];
+
+const SUB_TABS = {
+  structure: [
+    { id: "setup", label: "Setup" },
+    { id: "graph", label: "Graph" },
+    { id: "notes", label: "Notes" },
+    { id: "canvas", label: "Canvas" },
+    { id: "history", label: "History" },
+    { id: "saved", label: "Saved Graphs" },
+    { id: "advanced", label: "Advanced" },
+  ],
+  logic: [
+    { id: "overview", label: "Overview" },
+    { id: "signals", label: "Signals" },
+    { id: "files", label: "Files" },
+  ],
+  explain: [
+    { id: "overview", label: "Overview" },
+    { id: "bundle", label: "Bundle" },
+    { id: "history", label: "History" },
+  ],
+  build: [
+    { id: "goal", label: "Goal" },
+    { id: "preview", label: "Patch Preview" },
+    { id: "apply", label: "Apply" },
+    { id: "history", label: "History" },
+  ],
+};
+
+const LANE_COPY = {
+  structure: {
+    eyebrow: "Structure mapper",
+    title: "Map the files and folders you want the app to understand.",
     description:
-      "This is the setup screen. Load a demo, add a real source, preview the match set, then build a curated vault.",
+      "Use Structure to choose allowed sources, preview the graph, inspect notes, and review how the scoped workspace changes over time.",
   },
-  notes: {
-    eyebrow: "Notes workspace",
-    title: "Read and edit the files that made it into the current lens.",
+  logic: {
+    eyebrow: "Code mapper",
+    title: "See the code relationships the app can infer from the current scope.",
     description:
-      "Notes is for browsing matched files, following links, and editing the content you want inside the curated workspace.",
+      "Logic turns the current scoped workspace into imports, symbols, route hints, storage hints, and feature-level code signals.",
   },
-  canvas: {
-    eyebrow: "Canvas board",
-    title: "Arrange files and ideas on a visual board once the workspace has content.",
+  explain: {
+    eyebrow: "Code analyzer",
+    title: "Package architecture context into reusable explanation bundles.",
     description:
-      "Canvas should feel like a workspace, not another config page. Add selected files, sketch ideas, and save the board.",
+      "Explain combines snapshot and logic information into top files, top symbols, and architecture summaries that Build can reuse.",
   },
-  graph: {
-    eyebrow: "Graph map",
-    title: "See the local structure of the current workspace instead of guessing it.",
+  build: {
+    eyebrow: "Governed build",
+    title: "Plan and stage changes through deterministic or adapter-driven Build flows.",
     description:
-      "Graph focuses on relationships and entry points. Preview first, then use the map to decide what to open next.",
+      "Build works from snapshot, logic, and explain context. It generates scoped plans, patch previews, and scratch apply runs instead of writing directly to the main repo.",
   },
 };
 
@@ -186,10 +221,10 @@ function MetricCard({ label, value, hint }) {
 }
 
 
-function ViewHeader({ tab, actions }) {
-  const copy = TAB_COPY[tab];
+function LaneHeader({ lane, actions }) {
+  const copy = LANE_COPY[lane];
   return (
-    <section className={`view-header view-header--${tab}`}>
+    <section className={`view-header view-header--${lane}`}>
       <div className="view-header__body">
         <span className="eyebrow">{copy.eyebrow}</span>
         <h2>{copy.title}</h2>
@@ -197,6 +232,24 @@ function ViewHeader({ tab, actions }) {
       </div>
       <div className="view-header__actions">{actions}</div>
     </section>
+  );
+}
+
+
+function SubtabBar({ tabs, activeTab, onSelect }) {
+  return (
+    <div className="subtab-bar">
+      {tabs.map((tab) => (
+        <button
+          key={tab.id}
+          type="button"
+          className={`subtab-chip ${activeTab === tab.id ? "subtab-chip--active" : ""}`}
+          onClick={() => onSelect(tab.id)}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -609,7 +662,11 @@ function SourceSummaryList({ sourceSummaries }) {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("vault");
-  const [vaultMode, setVaultMode] = useState("basic");
+  const [mainTab, setMainTab] = useState("structure");
+  const [structureTab, setStructureTab] = useState("setup");
+  const [logicTab, setLogicTab] = useState("overview");
+  const [explainTab, setExplainTab] = useState("overview");
+  const [buildTab, setBuildTab] = useState("goal");
   const [appInfo, setAppInfo] = useState(null);
   const [examples, setExamples] = useState([]);
   const [presets, setPresets] = useState([]);
@@ -625,6 +682,8 @@ export default function App() {
   const [explainBundles, setExplainBundles] = useState([]);
   const [historyTimeline, setHistoryTimeline] = useState([]);
   const [historyComparison, setHistoryComparison] = useState(null);
+  const [buildGoalDraft, setBuildGoalDraft] = useState("Generate a deterministic scoped improvement plan");
+  const [buildPiecesDraft, setBuildPiecesDraft] = useState("docs_cleanup_piece");
   const [canvases, setCanvases] = useState([]);
   const [selectedCanvasId, setSelectedCanvasId] = useState("");
   const [jobs, setJobs] = useState([]);
@@ -683,6 +742,20 @@ export default function App() {
     return bootstrapPayload;
   }
 
+  function openStructureTab(tab) {
+    setMainTab("structure");
+    setStructureTab(tab);
+    if (tab === "notes") {
+      setActiveTab("notes");
+    } else if (tab === "canvas") {
+      setActiveTab("canvas");
+    } else if (tab === "graph") {
+      setActiveTab("graph");
+    } else {
+      setActiveTab("vault");
+    }
+  }
+
   const outgoingLinks = useMemo(() => {
     if (!selectedFile) {
       return [];
@@ -726,8 +799,12 @@ export default function App() {
           setLayout(payload.layout ?? layout);
           setBuildResult(normalizeResult(payload.last_result));
           setPreview(normalizeResult(payload.last_result));
+          setMainTab("structure");
+          setStructureTab("setup");
+          setLogicTab("overview");
+          setExplainTab("overview");
+          setBuildTab("goal");
           setActiveTab("vault");
-          setVaultMode("basic");
           if (!(payload.last_result?.summary?.file_count > 0)) {
             setNotice(
               (payload.config?.sources ?? []).length
@@ -811,7 +888,7 @@ export default function App() {
                 ? `Preview ready. ${result.summary.file_count} files are now visible in the workspace.`
                 : "Preview finished, but nothing matched yet. Adjust sources or patterns.",
             );
-            setActiveTab(result.summary?.file_count ? "graph" : "vault");
+            openStructureTab(result.summary?.file_count ? "graph" : "setup");
           } else {
             setBuildResult(result);
             setPreview(result);
@@ -827,7 +904,7 @@ export default function App() {
                 result.artifacts?.vault_dir || result.artifacts?.output_dir
               }.`,
             );
-            setActiveTab(result.summary?.file_count ? "notes" : "vault");
+            openStructureTab(result.summary?.file_count ? "notes" : "setup");
           }
           setBusy("");
           setActiveJobId("");
@@ -835,7 +912,7 @@ export default function App() {
           setError(job.error || "Job failed");
           setBusy("");
           setActiveJobId("");
-          setActiveTab("vault");
+          openStructureTab("setup");
         }
       } catch (pollError) {
         setError(pollError.message);
@@ -968,7 +1045,7 @@ export default function App() {
     const validationError = validateWorkspaceRun(payload);
     if (validationError) {
       setError(validationError);
-      setActiveTab("vault");
+      openStructureTab("setup");
       return;
     }
 
@@ -988,7 +1065,7 @@ export default function App() {
   async function handleLoadExample(example, autoPreview = false) {
     const nextConfig = normalizeConfig(example.config);
     patchConfig(nextConfig);
-    setActiveTab("vault");
+    openStructureTab("setup");
     if (autoPreview && nextConfig.sources.length) {
       await startWorkspaceJob("preview", nextConfig);
     } else {
@@ -999,7 +1076,7 @@ export default function App() {
   function loadPreset(preset) {
     patchConfig(normalizeConfig(preset.config));
     setNotice(`${preset.name} loaded.`);
-    setActiveTab("vault");
+    openStructureTab("setup");
   }
 
   async function handleSavePreset() {
@@ -1095,11 +1172,11 @@ export default function App() {
       setError("Run preview or build first so there is a snapshot bundle to use.");
       return;
     }
-    const goal = window.prompt("Build goal", "Generate a deterministic scoped improvement plan");
+    const goal = buildGoalDraft.trim() || window.prompt("Build goal", "Generate a deterministic scoped improvement plan");
     if (!goal) {
       return;
     }
-    const piecesValue = window.prompt("SLCS pieces (comma separated)", "docs_cleanup_piece");
+    const piecesValue = buildPiecesDraft.trim() || window.prompt("SLCS pieces (comma separated)", "docs_cleanup_piece");
     const selectedPieces = (piecesValue || "")
       .split(",")
       .map((item) => item.trim())
@@ -1255,7 +1332,7 @@ export default function App() {
     const firstAllowedRoot = config.access.allowed_roots[0];
     if (!firstAllowedRoot) {
       setError("Add an allowed root first so the app knows where a new note is permitted to be created.");
-      setActiveTab("vault");
+      openStructureTab("setup");
       return;
     }
 
@@ -1302,7 +1379,7 @@ export default function App() {
       });
       setCanvases((current) => [...current, canvas]);
       setSelectedCanvasId(canvas.id);
-      setActiveTab("canvas");
+      openStructureTab("canvas");
     } catch (canvasError) {
       setError(canvasError.message);
     }
@@ -1376,7 +1453,7 @@ export default function App() {
   function selectFile(file) {
     setSelectedFile(file);
     setQuickOpen(false);
-    setActiveTab("notes");
+    openStructureTab("notes");
   }
 
   function selectBookmark(bookmark) {
@@ -1387,6 +1464,95 @@ export default function App() {
       }
     }
   }
+
+  const latestSnapshotBundle = snapshotBundles[0] || activeResult?.snapshot_bundle || null;
+  const previousSnapshotBundle = snapshotBundles[1] || null;
+  const latestLogicProfile = logicProfiles[0] || null;
+  const latestExplainBundle = explainBundles[0] || null;
+  const latestPatchPreview = buildPatchPreviews[0] || null;
+  const latestApplyRun = buildApplyRuns[0] || null;
+  const latestParallelProfile = parallelScanProfiles[0] || null;
+  const latestDeltaSnapshot = deltaSnapshots[0] || null;
+  const activeSubTab =
+    mainTab === "structure"
+      ? structureTab
+      : mainTab === "logic"
+        ? logicTab
+        : mainTab === "explain"
+          ? explainTab
+          : buildTab;
+
+  function handleMainTabChange(tabId) {
+    setMainTab(tabId);
+  }
+
+  function handleSubTabChange(tabId) {
+    if (mainTab === "structure") {
+      openStructureTab(tabId);
+      return;
+    }
+    if (mainTab === "logic") {
+      setLogicTab(tabId);
+      return;
+    }
+    if (mainTab === "explain") {
+      setExplainTab(tabId);
+      return;
+    }
+    setBuildTab(tabId);
+  }
+
+  const structureActions = (
+    <>
+      {guidedDemo ? (
+        <button className="secondary-button" type="button" onClick={() => handleLoadExample(guidedDemo, true)} disabled={!!busy}>
+          Load demo
+        </button>
+      ) : null}
+      <button className="secondary-button" type="button" onClick={addSource} disabled={!!busy}>
+        Add source
+      </button>
+      <button className="secondary-button" type="button" onClick={() => startWorkspaceJob("preview")} disabled={!!busy}>
+        {busy === "preview" ? "Previewing..." : "Preview"}
+      </button>
+      <button className="primary-button" type="button" onClick={() => startWorkspaceJob("build")} disabled={!!busy}>
+        {busy === "build" ? "Building..." : "Build"}
+      </button>
+    </>
+  );
+
+  const logicActions = (
+    <>
+      <button className="secondary-button" type="button" onClick={handleRunParallelProfile} disabled={!!busy}>
+        Parallel scan
+      </button>
+      <button className="primary-button" type="button" onClick={handleRunLogicProfile} disabled={!!busy}>
+        Run logic
+      </button>
+    </>
+  );
+
+  const explainActions = (
+    <>
+      <button className="secondary-button" type="button" onClick={handleCompareSnapshots} disabled={!!busy || !previousSnapshotBundle}>
+        Compare snapshots
+      </button>
+      <button className="primary-button" type="button" onClick={handleCreateExplainBundle} disabled={!!busy}>
+        Create explain bundle
+      </button>
+    </>
+  );
+
+  const buildActions = (
+    <>
+      <button className="secondary-button" type="button" onClick={handleApplyPatchPreview} disabled={!!busy || !latestPatchPreview}>
+        Apply latest
+      </button>
+      <button className="primary-button" type="button" onClick={handleCreatePatchPreview} disabled={!!busy}>
+        Create patch preview
+      </button>
+    </>
+  );
 
   return (
     <div className="app-shell">
@@ -1403,139 +1569,185 @@ export default function App() {
         <div className="sidebar__brand">
           <div className="brand-mark">CV</div>
           <div>
-            <span className="eyebrow">Curated vault workbench</span>
+            <span className="eyebrow">Structure / Logic / Explain / Build</span>
             <h1>Context Vault Studio</h1>
           </div>
         </div>
 
-        {activeTab === "vault" ? (
+        <div className="sidebar__panel">
+          <span className="eyebrow">Current lane</span>
+          <h3>{LANE_COPY[mainTab].eyebrow}</h3>
+          <p className="sidebar-copy">{LANE_COPY[mainTab].description}</p>
+        </div>
+
+        {mainTab === "structure" ? (
           <>
-            <div className="sidebar__panel">
-              <span className="eyebrow">App</span>
-              <p className="sidebar-copy">
-                {appInfo?.description || "Obsidian-inspired curated AI workspace builder."}
-              </p>
-              <div className="sidebar-meta">
-                <span>{appInfo?.id}</span>
-                <span>{hasFiles ? `${files.length} files visible now` : "No files loaded yet"}</span>
-              </div>
-            </div>
-
-            <div className="sidebar__panel">
-              <div className="panel__header">
-                <div>
-                  <span className="eyebrow">Templates</span>
-                  <h3>Start with something that works</h3>
+            {structureTab === "setup" ? (
+              <>
+                <div className="sidebar__panel">
+                  <div className="panel__header">
+                    <div>
+                      <span className="eyebrow">Templates</span>
+                      <h3>Start with something that works</h3>
+                    </div>
+                  </div>
+                  <div className="example-stack">
+                    {examples.map((example) => (
+                      <button
+                        key={example.id}
+                        className="example-card"
+                        type="button"
+                        onClick={() => handleLoadExample(example, example.id === "guided-demo")}
+                      >
+                        <strong>{example.label}</strong>
+                        <span>{example.description}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
-              <div className="example-stack">
-                {examples.map((example) => (
-                  <button
-                    key={example.id}
-                    className="example-card"
-                    type="button"
-                    onClick={() => handleLoadExample(example, example.id === "guided-demo")}
-                  >
-                    <strong>{example.label}</strong>
-                    <span>{example.description}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {vaultMode === "advanced" ? (
-              <PresetPanel
-                presets={presets}
-                buildHistory={buildHistory}
-                jobs={jobs}
-                onLoadPreset={loadPreset}
-                onSavePreset={handleSavePreset}
-                onDeletePreset={handleDeletePreset}
-              />
-            ) : (
+                <div className="sidebar__panel">
+                  <span className="eyebrow">Setup guidance</span>
+                  <ul className="sidebar-list">
+                    <li>Choose the source folders the app is allowed to map.</li>
+                    <li>Preview before you build.</li>
+                    <li>Use `Advanced` only for lower-level controls and saved layouts.</li>
+                  </ul>
+                </div>
+              </>
+            ) : null}
+            {structureTab === "notes" ? (
+              <>
+                <div className="sidebar__panel">
+                  <span className="eyebrow">Notes</span>
+                  <p className="sidebar-copy">
+                    Browse matched files, follow links, and edit the scoped notes that made it into the current workspace.
+                  </p>
+                </div>
+                <BookmarkPanel bookmarks={bookmarks} onSelectBookmark={selectBookmark} />
+                <SnapshotPanel snapshots={snapshots} onRestore={handleRestoreSnapshot} />
+              </>
+            ) : null}
+            {structureTab === "canvas" ? (
+              <>
+                <div className="sidebar__panel">
+                  <span className="eyebrow">Canvas tips</span>
+                  <ul className="sidebar-list">
+                    <li>Select a file in Notes, then add it to the board.</li>
+                    <li>Use text cards for rough ideas and file cards for anchored context.</li>
+                    <li>Save the board after arranging cards.</li>
+                  </ul>
+                </div>
+                <BookmarkPanel bookmarks={bookmarks} onSelectBookmark={selectBookmark} />
+              </>
+            ) : null}
+            {structureTab === "graph" ? (
+              <>
+                <div className="sidebar__panel">
+                  <span className="eyebrow">Graph tips</span>
+                  <ul className="sidebar-list">
+                    <li>Preview or build first so the graph has real nodes.</li>
+                    <li>Use the graph to choose what to open next.</li>
+                    <li>Click a node to jump directly into notes.</li>
+                  </ul>
+                </div>
+                <div className="sidebar__panel">
+                  <span className="eyebrow">Current map</span>
+                  <div className="sidebar-card-stack">
+                    <div className="sidebar-card sidebar-card--static">
+                      <strong>{activeResult?.summary?.file_count ?? 0} files</strong>
+                      <span>{activeResult?.summary?.edge_count ?? 0} edges</span>
+                      <em>{activeResult ? "Ready to explore" : "No result yet"}</em>
+                    </div>
+                  </div>
+                </div>
+              </>
+            ) : null}
+            {structureTab === "history" || structureTab === "saved" || structureTab === "advanced" ? (
               <div className="sidebar__panel">
-                <span className="eyebrow">Mode</span>
+                <span className="eyebrow">Artifact summary</span>
                 <p className="sidebar-copy">
-                  You are in basic mode. The setup forms stay hidden until you open advanced mode.
+                  Snapshot bundles: {snapshotBundles.length}
                 </p>
-              </div>
-            )}
-          </>
-        ) : null}
-
-        {activeTab === "notes" ? (
-          <>
-            <div className="sidebar__panel">
-              <span className="eyebrow">Notes</span>
-              <p className="sidebar-copy">
-                Browse the matched files, open linked notes, and bookmark the ones you want to revisit.
-              </p>
-            </div>
-            <BookmarkPanel bookmarks={bookmarks} onSelectBookmark={selectBookmark} />
-            <SnapshotPanel snapshots={snapshots} onRestore={handleRestoreSnapshot} />
-          </>
-        ) : null}
-
-        {activeTab === "canvas" ? (
-          <>
-            <div className="sidebar__panel">
-              <span className="eyebrow">Canvas tips</span>
-              <ul className="sidebar-list">
-                <li>Select a file in Notes, then add it to the board.</li>
-                <li>Use text cards for rough ideas and file cards for anchored context.</li>
-                <li>Save the board after arranging cards.</li>
-              </ul>
-            </div>
-            <BookmarkPanel bookmarks={bookmarks} onSelectBookmark={selectBookmark} />
-          </>
-        ) : null}
-
-        {activeTab === "graph" ? (
-          <>
-            <div className="sidebar__panel">
-              <span className="eyebrow">Graph tips</span>
-              <ul className="sidebar-list">
-                <li>Preview or build first so the graph has real nodes.</li>
-                <li>Use the graph to choose what to open next, not as another config form.</li>
-                <li>Click a node to jump directly into Notes.</li>
-              </ul>
-            </div>
-            <div className="sidebar__panel">
-              <span className="eyebrow">Current map</span>
-              <div className="sidebar-card-stack">
-                <div className="sidebar-card sidebar-card--static">
-                  <strong>{activeResult?.summary?.file_count ?? 0} files</strong>
-                  <span>{activeResult?.summary?.edge_count ?? 0} edges</span>
-                  <em>{activeResult ? "Ready to explore" : "No result yet"}</em>
+                <div className="sidebar-meta">
+                  <span>Delta snapshots: {deltaSnapshots.length}</span>
+                  <span>Patch previews: {buildPatchPreviews.length}</span>
+                  <span>Apply runs: {buildApplyRuns.length}</span>
                 </div>
               </div>
-            </div>
+            ) : null}
           </>
+        ) : null}
+
+        {mainTab === "logic" ? (
+          <div className="sidebar__panel">
+            <span className="eyebrow">Latest logic profile</span>
+            <div className="sidebar-card-stack">
+              <div className="sidebar-card sidebar-card--static">
+                <strong>{latestLogicProfile?.label || "No logic profile yet"}</strong>
+                <span>{latestLogicProfile ? `${latestLogicProfile.file_count} files profiled` : "Run Logic profile to generate code signals."}</span>
+                <em>{latestLogicProfile ? `${latestLogicProfile.import_count} imports, ${latestLogicProfile.symbol_count} symbols` : "First-pass code mapper"}</em>
+              </div>
+              <div className="sidebar-card sidebar-card--static">
+                <strong>Parallel scan</strong>
+                <span>{latestParallelProfile ? latestParallelProfile.label : "Not generated yet"}</span>
+                <em>{latestParallelProfile ? `${latestParallelProfile.file_count} files, ${latestParallelProfile.worker_count} workers` : "Thread + process foundation"}</em>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {mainTab === "explain" ? (
+          <div className="sidebar__panel">
+            <span className="eyebrow">Latest explain bundle</span>
+            <div className="sidebar-card-stack">
+              <div className="sidebar-card sidebar-card--static">
+                <strong>{latestExplainBundle?.label || "No explain bundle yet"}</strong>
+                <span>{latestExplainBundle ? `${latestExplainBundle.top_file_count} top files` : "Create an Explain bundle from the current snapshot."}</span>
+                <em>{latestExplainBundle ? `${latestExplainBundle.top_symbol_count} top symbols` : "Architecture handoff layer"}</em>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {mainTab === "build" ? (
+          <div className="sidebar__panel">
+            <span className="eyebrow">Build status</span>
+            <div className="sidebar-card-stack">
+              <div className="sidebar-card sidebar-card--static">
+                <strong>{latestPatchPreview?.label || "No patch preview yet"}</strong>
+                <span>{latestPatchPreview ? `${latestPatchPreview.copied_file_count} scoped inputs` : "Create a scoped deterministic preview first."}</span>
+                <em>{latestPatchPreview ? `${latestPatchPreview.warning_count} warnings, ${latestPatchPreview.error_count} errors` : "Patch gate"}</em>
+              </div>
+              <div className="sidebar-card sidebar-card--static">
+                <strong>{latestApplyRun?.label || "No apply run yet"}</strong>
+                <span>{latestApplyRun ? "Scratch apply completed" : "Apply runs stay in scratch space."}</span>
+                <em>{latestApplyRun ? latestApplyRun.preview_id : "Safe reconciliation loop"}</em>
+              </div>
+            </div>
+          </div>
         ) : null}
       </aside>
 
       <main className="workspace">
-        <div className="window-bar">
-          <span className="window-dot" />
-          <span className="window-dot" />
-          <span className="window-dot" />
-          <div className="window-tabs">
-            {[
-              ["vault", "Vault"],
-              ["notes", "Notes"],
-              ["canvas", "Canvas"],
-              ["graph", "Graph"],
-            ].map(([id, label]) => (
-              <button
-                key={id}
-                className={`window-tab ${activeTab === id ? "window-tab--active" : ""}`}
-                type="button"
-                onClick={() => setActiveTab(id)}
-              >
-                {label}
-              </button>
-            ))}
+        <div className={`workspace-header workspace-header--${mainTab}`}>
+          <div className="window-bar">
+            <span className="window-dot" />
+            <span className="window-dot" />
+            <span className="window-dot" />
+            <div className="window-tabs">
+              {MAIN_TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  className={`window-tab window-tab--${tab.id} ${mainTab === tab.id ? "window-tab--active" : ""}`}
+                  type="button"
+                  onClick={() => handleMainTabChange(tab.id)}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
           </div>
+          <SubtabBar tabs={SUB_TABS[mainTab]} activeTab={activeSubTab} onSelect={handleSubTabChange} />
         </div>
 
         {error ? <div className="callout callout--error">{error}</div> : null}
@@ -1551,121 +1763,24 @@ export default function App() {
           <div className="callout callout--error">Last job failed: {latestJob.error || latestJob.message}</div>
         ) : null}
 
-        {activeTab === "vault" ? (
+        {mainTab === "structure" && structureTab === "setup" ? (
           <>
-            <ViewHeader
-              tab="vault"
-              actions={
-                <>
-                  {guidedDemo ? (
-                    <button
-                      className="secondary-button"
-                      type="button"
-                      onClick={() => handleLoadExample(guidedDemo, true)}
-                      disabled={!!busy}
-                    >
-                      Load demo
-                    </button>
-                  ) : null}
-                  <button className="secondary-button" type="button" onClick={addSource} disabled={!!busy}>
-                    Add source
-                  </button>
-                  <button className="secondary-button" type="button" onClick={() => startWorkspaceJob("preview")} disabled={!!busy}>
-                    {busy === "preview" ? "Previewing..." : "Preview"}
-                  </button>
-                  <button className="primary-button" type="button" onClick={() => startWorkspaceJob("build")} disabled={!!busy}>
-                    {busy === "build" ? "Building..." : "Build vault"}
-                  </button>
-                  <button
-                    className={vaultMode === "advanced" ? "ghost-button" : "secondary-button"}
-                    type="button"
-                    onClick={() => setVaultMode((current) => (current === "advanced" ? "basic" : "advanced"))}
-                  >
-                    {vaultMode === "advanced" ? "Basic mode" : "Advanced mode"}
-                  </button>
-                </>
-              }
-            />
-
+            <LaneHeader lane="structure" actions={structureActions} />
             <section className="vault-home-grid">
-              <section className="panel">
-                <div className="panel__header panel__header--spread">
-                  <div>
-                    <span className="eyebrow">Workspace map</span>
-                    <h3>See the current workspace first</h3>
-                  </div>
-                  <button className="secondary-button" type="button" onClick={() => setActiveTab("graph")}>
-                    Open graph
-                  </button>
-                </div>
-                {activeResult?.graph?.nodes?.length ? (
-                  <GraphMap
-                    graph={activeResult.graph}
-                    onSelectNode={(node) => {
-                      const file = fileLookup.get(node.id);
-                      if (file) {
-                        selectFile(file);
-                      }
-                    }}
-                  />
-                ) : (
-                  <EmptyTabState
-                    title="No map yet"
-                    body="Run preview or load the guided demo. Once the workspace is indexed, the graph will appear here."
-                    actions={[
-                      guidedDemo ? { label: "Load guided demo", onClick: () => handleLoadExample(guidedDemo, true), primary: true } : null,
-                      { label: "Run preview", onClick: () => startWorkspaceJob("preview") },
-                    ].filter(Boolean)}
-                  />
-                )}
-              </section>
-
               <div className="vault-home-side">
-                <section className="panel">
-                  <div className="panel__header">
-                    <div>
-                      <span className="eyebrow">Essential actions</span>
-                      <h3>Do the main thing quickly</h3>
-                    </div>
-                  </div>
-                  <div className="quickstart-grid quickstart-grid--stack">
-                    <article className="quickstart-card">
-                      <strong>Load a working demo</strong>
-                      <p>Use the bundled sample vault if you want to test the app without touching your real folders.</p>
-                      <button className="secondary-button" type="button" onClick={() => handleLoadExample(guidedDemo, true)}>
-                        Load guided demo
-                      </button>
-                    </article>
-                    <article className="quickstart-card">
-                      <strong>Preview the current scope</strong>
-                      <p>Check what will be included before you build the actual vault.</p>
-                      <button className="secondary-button" type="button" onClick={() => startWorkspaceJob("preview")}>
-                        Run preview
-                      </button>
-                    </article>
-                    <article className="quickstart-card">
-                      <strong>Build the vault</strong>
-                      <p>Create the Obsidian-friendly vault and graph artifacts from the current rules.</p>
-                      <button className="primary-button" type="button" onClick={() => startWorkspaceJob("build")}>
-                        Build vault
-                      </button>
-                    </article>
-                  </div>
-                </section>
-
                 <ResultSpotlight
                   result={activeResult}
                   outputDir={buildResult?.artifacts?.vault_dir}
                   snapshotBundle={activeResult?.snapshot_bundle || snapshotBundles[0]}
-                  onOpenNotes={() => setActiveTab("notes")}
-                  onOpenGraph={() => setActiveTab("graph")}
+                  onOpenNotes={() => openStructureTab("notes")}
+                  onOpenGraph={() => openStructureTab("graph")}
                 />
 
                 <section className="panel">
                   <div className="panel__header">
                     <div>
                       <span className="eyebrow">At a glance</span>
-                      <h3>Current workspace status</h3>
+                      <h3>Current structure state</h3>
                     </div>
                   </div>
                   <div className="metrics-grid">
@@ -1685,36 +1800,22 @@ export default function App() {
                     </ul>
                   ) : null}
                 </section>
-
-                <ArtifactStatusPanel
-                  logicProfiles={logicProfiles}
-                  explainBundles={explainBundles}
-                  patchPreviews={buildPatchPreviews}
-                  applyRuns={buildApplyRuns}
-                  deltaSnapshots={deltaSnapshots}
-                  parallelProfiles={parallelScanProfiles}
-                  timeline={historyTimeline}
-                  comparison={historyComparison}
-                  onRunLogicProfile={handleRunLogicProfile}
-                  onCreateExplainBundle={handleCreateExplainBundle}
-                  onCreatePatchPreview={handleCreatePatchPreview}
-                  onApplyPatchPreview={handleApplyPatchPreview}
-                  onCreateDeltaSnapshot={handleCreateDeltaSnapshot}
-                  onRunParallelProfile={handleRunParallelProfile}
-                  onCompareSnapshots={handleCompareSnapshots}
-                  busy={busy}
-                />
               </div>
-            </section>
 
-            {vaultMode === "advanced" ? (
-              <section className="vault-layout">
-                <div className="vault-layout__main">
+              <div className="vault-home-main">
+                <QuickStartPanel
+                  demoExample={guidedDemo}
+                  onLoadDemo={() => handleLoadExample(guidedDemo, true)}
+                  onAddSource={addSource}
+                  onRunPreview={() => startWorkspaceJob("preview")}
+                  hasSources={deferredSources.length}
+                  activeResult={activeResult}
+                />
                 <section className="panel">
                   <div className="panel__header panel__header--spread">
                     <div>
-                      <span className="eyebrow">Sources</span>
-                      <h3>Choose the folders the app is allowed to map</h3>
+                      <span className="eyebrow">Setup</span>
+                      <h3>Choose the folders Structure is allowed to map</h3>
                     </div>
                     <div className="hero__actions hero__actions--tight">
                       <button className="primary-button" type="button" onClick={addSource}>
@@ -1722,6 +1823,9 @@ export default function App() {
                       </button>
                       <button className="secondary-button" type="button" onClick={handleCreateNote}>
                         New note
+                      </button>
+                      <button className="ghost-button" type="button" onClick={() => openStructureTab("advanced")}>
+                        Advanced
                       </button>
                     </div>
                   </div>
@@ -1761,17 +1865,17 @@ export default function App() {
                 <section className="panel">
                   <div className="panel__header">
                     <div>
-                      <span className="eyebrow">Workspace settings</span>
-                      <h3>Set the build destination and default rules</h3>
+                      <span className="eyebrow">Settings</span>
+                      <h3>Set the output location, rules, and sandbox boundaries</h3>
                     </div>
                   </div>
                   <div className="field-grid">
                     <label>
-                      <span>Vault name</span>
+                      <span>Workspace name</span>
                       <input value={config.vault_name} onChange={(event) => updateField("vault_name", event.target.value)} />
                     </label>
                     <label>
-                      <span>Output directory</span>
+                      <span>Folder to save graphs and builds</span>
                       <input
                         value={config.output_dir}
                         onChange={(event) => updateField("output_dir", event.target.value)}
@@ -1812,58 +1916,25 @@ export default function App() {
                         placeholder={"node_modules/**\ndist/**"}
                       />
                     </label>
+                    <label>
+                      <span>Blocked folders / files</span>
+                      <textarea
+                        rows="4"
+                        value={joinLines(config.access.blocked_paths)}
+                        onChange={(event) => updateAccessField("blocked_paths", splitLines(event.target.value))}
+                        placeholder={"../Private\n../../secrets"}
+                      />
+                    </label>
+                    <label>
+                      <span>Blocked patterns</span>
+                      <textarea
+                        rows="4"
+                        value={joinLines(config.access.blocked_patterns)}
+                        onChange={(event) => updateAccessField("blocked_patterns", splitLines(event.target.value))}
+                        placeholder={"**/*.key\n**/drafts/private/**"}
+                      />
+                    </label>
                   </div>
-                </section>
-                </div>
-
-                <div className="vault-layout__side">
-                  <section className="panel">
-                    <div className="panel__header panel__header--spread">
-                      <div>
-                        <span className="eyebrow">Boundary</span>
-                        <h3>Tell the app where it may and may not look</h3>
-                      </div>
-                      <div className="hero__actions hero__actions--tight">
-                        <button className="secondary-button" type="button" onClick={handleSave} disabled={!!busy}>
-                          {busy === "save" ? "Saving..." : "Save settings"}
-                        </button>
-                        <button className="ghost-button" type="button" onClick={exportConfig}>
-                          Export JSON
-                        </button>
-                        <button className="ghost-button" type="button" onClick={handleExportBundle}>
-                          Export bundle
-                        </button>
-                      </div>
-                    </div>
-                    <div className="field-grid">
-                      <label>
-                        <span>Allowed roots</span>
-                        <textarea
-                          rows="5"
-                          value={joinLines(config.access.allowed_roots)}
-                          onChange={(event) => updateAccessField("allowed_roots", splitLines(event.target.value))}
-                          placeholder={"../Documents\n../../projects/my-repo"}
-                        />
-                      </label>
-                      <label>
-                        <span>Blocked paths</span>
-                        <textarea
-                          rows="5"
-                          value={joinLines(config.access.blocked_paths)}
-                          onChange={(event) => updateAccessField("blocked_paths", splitLines(event.target.value))}
-                          placeholder={"../Private\n../../secrets"}
-                        />
-                      </label>
-                      <label className="field-grid__wide">
-                        <span>Blocked patterns</span>
-                        <textarea
-                          rows="4"
-                          value={joinLines(config.access.blocked_patterns)}
-                          onChange={(event) => updateAccessField("blocked_patterns", splitLines(event.target.value))}
-                          placeholder={"**/*.key\n**/drafts/private/**"}
-                        />
-                      </label>
-                    </div>
                     <label className="checkbox-field">
                       <input
                         type="checkbox"
@@ -1872,82 +1943,63 @@ export default function App() {
                       />
                       <span>Force copy-only builds so the generated vault becomes the hard curated boundary.</span>
                     </label>
-                  </section>
-
-                  <section className="panel panel--metrics">
-                    <div className="panel__header">
-                      <div>
-                        <span className="eyebrow">Current lens</span>
-                        <h3>What the workspace sees right now</h3>
-                      </div>
-                    </div>
-                    <div className="metrics-grid">
-                      <MetricCard label="Sources" value={hasSources ? deferredSources.length : 0} hint="Folders in scope" />
-                      <MetricCard label="Blocked rules" value={blockedRuleCount} hint="Paths and patterns denied" />
-                      <MetricCard label="Files" value={activeResult?.summary?.file_count ?? "—"} hint="Matched on preview/build" />
-                      <MetricCard label="Edges" value={activeResult?.summary?.edge_count ?? "—"} hint="Graph relationships" />
-                    </div>
-                    <div className="build-facts">
-                      <div>
-                        <span className="eyebrow">Output path</span>
-                        <div className="microcopy">{config.output_dir || "Not set yet"}</div>
-                      </div>
-                      <div>
-                        <span className="eyebrow">Last job</span>
-                        <div className="microcopy">{latestJob ? `${latestJob.kind}: ${latestJob.status}` : "No jobs yet"}</div>
-                      </div>
-                    </div>
-                  </section>
-
-                  <section className="panel">
-                    <div className="panel__header">
-                      <div>
-                        <span className="eyebrow">Matched content</span>
-                        <h3>What the current result includes</h3>
-                      </div>
-                    </div>
-                    <SourceSummaryList sourceSummaries={activeResult?.source_summaries} />
-                  </section>
-
-                  <ArtifactStatusPanel
-                    logicProfiles={logicProfiles}
-                    explainBundles={explainBundles}
-                    patchPreviews={buildPatchPreviews}
-                    applyRuns={buildApplyRuns}
-                    deltaSnapshots={deltaSnapshots}
-                    parallelProfiles={parallelScanProfiles}
-                    timeline={historyTimeline}
-                    comparison={historyComparison}
-                    onRunLogicProfile={handleRunLogicProfile}
-                    onCreateExplainBundle={handleCreateExplainBundle}
-                    onCreatePatchPreview={handleCreatePatchPreview}
-                    onApplyPatchPreview={handleApplyPatchPreview}
-                    onCreateDeltaSnapshot={handleCreateDeltaSnapshot}
-                    onRunParallelProfile={handleRunParallelProfile}
-                    onCompareSnapshots={handleCompareSnapshots}
-                    busy={busy}
-                  />
-                </div>
-              </section>
-            ) : null}
+                  <div className="hero__actions hero__actions--tight">
+                    <button className="secondary-button" type="button" onClick={handleSave} disabled={!!busy}>
+                      {busy === "save" ? "Saving..." : "Save settings"}
+                    </button>
+                    <button className="ghost-button" type="button" onClick={exportConfig}>
+                      Export JSON
+                    </button>
+                    <button className="ghost-button" type="button" onClick={handleExportBundle}>
+                      Export bundle
+                    </button>
+                  </div>
+                </section>
+              </div>
+            </section>
           </>
         ) : null}
 
-        {activeTab === "notes" ? (
+        {mainTab === "structure" && structureTab === "graph" ? (
           <>
-            <ViewHeader
-              tab="notes"
-              actions={
-                <>
-                  <button className="secondary-button" type="button" onClick={() => setQuickOpen(true)}>
-                    Quick open
+            <LaneHeader lane="structure" actions={structureActions} />
+            {activeResult?.graph?.nodes?.length ? (
+              <section className="panel">
+                <div className="panel__header panel__header--spread">
+                  <div>
+                    <span className="eyebrow">Graph</span>
+                    <h3>Visual structure of the current workspace</h3>
+                  </div>
+                  <button className="secondary-button" type="button" onClick={() => openStructureTab("notes")}>
+                    Open selected notes
                   </button>
-                  <button className="secondary-button" type="button" onClick={() => startWorkspaceJob("preview")} disabled={!!busy}>
-                    Refresh preview
-                  </button>
-                </>
-              }
-            />
+                </div>
+                <GraphMap
+                  graph={activeResult?.graph}
+                  onSelectNode={(node) => {
+                    const file = fileLookup.get(node.id);
+                    if (file) {
+                      selectFile(file);
+                    }
+                  }}
+                />
+              </section>
+            ) : (
+              <EmptyTabState
+                title="No graph yet"
+                body="Preview the workspace first. Once files are indexed, the graph will show the source and note relationships here."
+                actions={[
+                  { label: "Run preview", onClick: () => startWorkspaceJob("preview"), primary: true },
+                  guidedDemo ? { label: "Load guided demo", onClick: () => handleLoadExample(guidedDemo, true) } : null,
+                ].filter(Boolean)}
+              />
+            )}
+          </>
+        ) : null}
+
+        {mainTab === "structure" && structureTab === "notes" ? (
+          <>
+            <LaneHeader lane="structure" actions={structureActions} />
             {hasFiles ? (
               <section className="notes-grid">
                 <ExplorerPane
@@ -1982,21 +2034,9 @@ export default function App() {
           </>
         ) : null}
 
-        {activeTab === "canvas" ? (
+        {mainTab === "structure" && structureTab === "canvas" ? (
           <>
-            <ViewHeader
-              tab="canvas"
-              actions={
-                <>
-                  <button className="secondary-button" type="button" onClick={handleCreateCanvas}>
-                    New canvas
-                  </button>
-                  <button className="secondary-button" type="button" onClick={() => setActiveTab("notes")}>
-                    Pick a file
-                  </button>
-                </>
-              }
-            />
+            <LaneHeader lane="structure" actions={structureActions} />
             <CanvasBoard
               canvases={canvases}
               selectedCanvasId={selectedCanvasId}
@@ -2010,49 +2050,515 @@ export default function App() {
           </>
         ) : null}
 
-        {activeTab === "graph" ? (
+        {mainTab === "structure" && structureTab === "history" ? (
           <>
-            <ViewHeader
-              tab="graph"
-              actions={
-                <>
-                  <button className="secondary-button" type="button" onClick={() => startWorkspaceJob("preview")} disabled={!!busy}>
-                    Refresh graph
+            <LaneHeader lane="structure" actions={structureActions} />
+            <section className="vault-layout">
+              <section className="panel">
+                <div className="panel__header panel__header--spread">
+                  <div>
+                    <span className="eyebrow">Timeline</span>
+                    <h3>How the scoped workspace changed over time</h3>
+                  </div>
+                  <button className="secondary-button" type="button" onClick={handleCreateDeltaSnapshot} disabled={!!busy}>
+                    Create delta snapshot
                   </button>
-                  <button className="secondary-button" type="button" onClick={() => setActiveTab("notes")}>
-                    Open notes
+                </div>
+                {historyTimeline.length ? (
+                  <ul className="compact-list">
+                    {historyTimeline.slice(0, 12).map((item) => (
+                      <li key={`${item.kind}-${item.id}`}>
+                        <strong>{item.label}</strong>
+                        <span>{item.kind}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="empty-copy">No timeline artifacts yet.</p>
+                )}
+              </section>
+
+              <section className="panel">
+                <div className="panel__header panel__header--spread">
+                  <div>
+                    <span className="eyebrow">Comparison</span>
+                    <h3>Compare the newest two snapshot bundles</h3>
+                  </div>
+                  <button className="secondary-button" type="button" onClick={handleCompareSnapshots} disabled={!!busy || !previousSnapshotBundle}>
+                    Compare
                   </button>
-                </>
-              }
-            />
-            {activeResult?.graph?.nodes?.length ? (
+                </div>
+                {historyComparison ? (
+                  <div className="artifact-note">
+                    <strong>
+                      {historyComparison.summary.changed_count} changed, {historyComparison.summary.added_count} added, {historyComparison.summary.removed_count} removed
+                    </strong>
+                    <span>Changed files: {historyComparison.changed_files.slice(0, 6).join(", ") || "None"}</span>
+                  </div>
+                ) : (
+                  <p className="empty-copy">Use Compare to inspect the latest snapshot changes.</p>
+                )}
+                <div className="metrics-grid">
+                  <MetricCard label="Snapshot bundles" value={snapshotBundles.length} hint="Saved structure states" />
+                  <MetricCard label="Delta snapshots" value={deltaSnapshots.length} hint="Hash-based diffs" />
+                </div>
+              </section>
+            </section>
+          </>
+        ) : null}
+
+        {mainTab === "structure" && structureTab === "saved" ? (
+          <>
+            <LaneHeader lane="structure" actions={structureActions} />
+            <section className="vault-layout">
               <section className="panel">
                 <div className="panel__header">
                   <div>
-                    <span className="eyebrow">Graph</span>
-                    <h3>Obsidian-style local map</h3>
+                    <span className="eyebrow">Saved graphs</span>
+                    <h3>Snapshot bundles and build history</h3>
                   </div>
                 </div>
-                <GraphMap
-                  graph={activeResult?.graph}
-                  onSelectNode={(node) => {
-                    const file = fileLookup.get(node.id);
-                    if (file) {
-                      selectFile(file);
-                    }
-                  }}
-                />
+                {snapshotBundles.length ? (
+                  <ul className="compact-list">
+                    {snapshotBundles.map((bundle) => (
+                      <li key={bundle.id}>
+                        <strong>{bundle.label}</strong>
+                        <span>{bundle.file_count} files, {bundle.edge_count} edges</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="empty-copy">No saved graph snapshots yet.</p>
+                )}
               </section>
-            ) : (
-              <EmptyTabState
-                title="No graph yet"
-                body="Preview the workspace first. Once files are indexed, the graph will show the source and note relationships here."
-                actions={[
-                  { label: "Run preview", onClick: () => startWorkspaceJob("preview"), primary: true },
-                  guidedDemo ? { label: "Load guided demo", onClick: () => handleLoadExample(guidedDemo, true) } : null,
-                ].filter(Boolean)}
-              />
-            )}
+              <section className="panel">
+                <div className="panel__header">
+                  <div>
+                    <span className="eyebrow">Build history</span>
+                    <h3>Recent builds</h3>
+                  </div>
+                </div>
+                {buildHistory.length ? (
+                  <ul className="compact-list">
+                    {buildHistory.map((entry) => (
+                      <li key={entry.id}>
+                        <strong>{entry.summary?.vault_name || "Vault build"}</strong>
+                        <span>{entry.summary?.file_count || 0} files</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="empty-copy">No build history yet.</p>
+                )}
+              </section>
+            </section>
+          </>
+        ) : null}
+
+        {mainTab === "structure" && structureTab === "advanced" ? (
+          <>
+            <LaneHeader lane="structure" actions={structureActions} />
+            <section className="vault-layout">
+              <div className="vault-layout__main">
+                <PresetPanel
+                  presets={presets}
+                  buildHistory={buildHistory}
+                  jobs={jobs}
+                  onLoadPreset={loadPreset}
+                  onSavePreset={handleSavePreset}
+                  onDeletePreset={handleDeletePreset}
+                />
+              </div>
+              <div className="vault-layout__side">
+                <ArtifactStatusPanel
+                  logicProfiles={logicProfiles}
+                  explainBundles={explainBundles}
+                  patchPreviews={buildPatchPreviews}
+                  applyRuns={buildApplyRuns}
+                  deltaSnapshots={deltaSnapshots}
+                  parallelProfiles={parallelScanProfiles}
+                  timeline={historyTimeline}
+                  comparison={historyComparison}
+                  onRunLogicProfile={handleRunLogicProfile}
+                  onCreateExplainBundle={handleCreateExplainBundle}
+                  onCreatePatchPreview={handleCreatePatchPreview}
+                  onApplyPatchPreview={handleApplyPatchPreview}
+                  onCreateDeltaSnapshot={handleCreateDeltaSnapshot}
+                  onRunParallelProfile={handleRunParallelProfile}
+                  onCompareSnapshots={handleCompareSnapshots}
+                  busy={busy}
+                />
+              </div>
+            </section>
+          </>
+        ) : null}
+
+        {mainTab === "logic" ? (
+          <>
+            <LaneHeader lane="logic" actions={logicActions} />
+            {logicTab === "overview" ? (
+              <section className="vault-layout">
+                <section className="panel">
+                  <div className="panel__header">
+                    <div>
+                      <span className="eyebrow">Overview</span>
+                      <h3>Current code-mapping state</h3>
+                    </div>
+                  </div>
+                  <div className="metrics-grid">
+                    <MetricCard label="Profiles" value={logicProfiles.length} hint="Stored logic runs" />
+                    <MetricCard label="Imports" value={latestLogicProfile?.import_count ?? 0} hint="Detected imports" />
+                    <MetricCard label="Symbols" value={latestLogicProfile?.symbol_count ?? 0} hint="Detected symbols" />
+                    <MetricCard label="Routes" value={latestLogicProfile?.route_count ?? 0} hint="Route hints" />
+                  </div>
+                  <p className="microcopy">
+                    Logic is the first-pass code mapper. It turns the current scoped workspace into import, symbol, route, and storage-touch signals.
+                  </p>
+                </section>
+                <section className="panel">
+                  <div className="panel__header">
+                    <div>
+                      <span className="eyebrow">Parallel profile</span>
+                      <h3>Scan performance</h3>
+                    </div>
+                  </div>
+                  {latestParallelProfile ? (
+                    <div className="metrics-grid">
+                      <MetricCard label="Files" value={latestParallelProfile.file_count} hint="Profiled files" />
+                      <MetricCard label="Workers" value={latestParallelProfile.worker_count} hint="Parallel workers" />
+                    </div>
+                  ) : (
+                    <p className="empty-copy">Run Parallel scan to measure the current scoped sources.</p>
+                  )}
+                </section>
+              </section>
+            ) : null}
+            {logicTab === "signals" ? (
+              <section className="vault-layout">
+                <section className="panel">
+                  <div className="panel__header">
+                    <div>
+                      <span className="eyebrow">Signals</span>
+                      <h3>Latest logic counts</h3>
+                    </div>
+                  </div>
+                  <div className="metrics-grid">
+                    <MetricCard label="Files" value={latestLogicProfile?.file_count ?? 0} hint="Scoped code files" />
+                    <MetricCard label="Imports" value={latestLogicProfile?.import_count ?? 0} hint="Import statements" />
+                    <MetricCard label="Symbols" value={latestLogicProfile?.symbol_count ?? 0} hint="Named functions/classes" />
+                    <MetricCard label="Storage" value={latestLogicProfile?.storage_touch_count ?? 0} hint="Storage touch hints" />
+                  </div>
+                </section>
+                <section className="panel">
+                  <div className="panel__header">
+                    <div>
+                      <span className="eyebrow">Artifacts</span>
+                      <h3>Supporting engine outputs</h3>
+                    </div>
+                  </div>
+                  <ul className="compact-list">
+                    <li>
+                      <strong>Snapshot bundles</strong>
+                      <span>{snapshotBundles.length} available</span>
+                    </li>
+                    <li>
+                      <strong>Delta snapshots</strong>
+                      <span>{deltaSnapshots.length} available</span>
+                    </li>
+                    <li>
+                      <strong>Timeline entries</strong>
+                      <span>{historyTimeline.length} available</span>
+                    </li>
+                  </ul>
+                </section>
+              </section>
+            ) : null}
+            {logicTab === "files" ? (
+              <section className="panel">
+                <div className="panel__header">
+                  <div>
+                    <span className="eyebrow">Scoped files</span>
+                    <h3>Files available to the current logic run</h3>
+                  </div>
+                </div>
+                {activeResult?.files?.length ? (
+                  <ul className="compact-list">
+                    {activeResult.files.slice(0, 40).map((file) => (
+                      <li key={file.id}>
+                        <strong>{file.rel_path}</strong>
+                        <span>{file.source_name}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="empty-copy">Preview the current scope first.</p>
+                )}
+              </section>
+            ) : null}
+          </>
+        ) : null}
+
+        {mainTab === "explain" ? (
+          <>
+            <LaneHeader lane="explain" actions={explainActions} />
+            {explainTab === "overview" ? (
+              <section className="vault-layout">
+                <section className="panel">
+                  <div className="panel__header">
+                    <div>
+                      <span className="eyebrow">Overview</span>
+                      <h3>Explain what the current scope means</h3>
+                    </div>
+                  </div>
+                  <div className="metrics-grid">
+                    <MetricCard label="Bundles" value={explainBundles.length} hint="Saved explain runs" />
+                    <MetricCard label="Top files" value={latestExplainBundle?.top_file_count ?? 0} hint="Files carried into explain context" />
+                    <MetricCard label="Top symbols" value={latestExplainBundle?.top_symbol_count ?? 0} hint="Logic-backed symbol summaries" />
+                    <MetricCard label="Logic profiles" value={logicProfiles.length} hint="Source for explain context" />
+                  </div>
+                </section>
+                <section className="panel">
+                  <div className="panel__header">
+                    <div>
+                      <span className="eyebrow">Bridge</span>
+                      <h3>Explain to Build handoff</h3>
+                    </div>
+                  </div>
+                  <p className="microcopy">
+                    Explain bundles package architecture summary, top files, top symbols, and feature clusters so Build can plan against a smaller, more intelligible context packet.
+                  </p>
+                </section>
+              </section>
+            ) : null}
+            {explainTab === "bundle" ? (
+              <section className="vault-layout">
+                <section className="panel">
+                  <div className="panel__header">
+                    <div>
+                      <span className="eyebrow">Bundle</span>
+                      <h3>Latest explain bundle</h3>
+                    </div>
+                  </div>
+                  {latestExplainBundle ? (
+                    <ul className="compact-list">
+                      <li>
+                        <strong>{latestExplainBundle.label}</strong>
+                        <span>{latestExplainBundle.top_file_count} top files</span>
+                      </li>
+                      <li>
+                        <strong>Snapshot source</strong>
+                        <span>{latestExplainBundle.snapshot_bundle_id}</span>
+                      </li>
+                      <li>
+                        <strong>Logic source</strong>
+                        <span>{latestExplainBundle.logic_profile_id || "none"}</span>
+                      </li>
+                    </ul>
+                  ) : (
+                    <p className="empty-copy">Create an explain bundle from the latest snapshot.</p>
+                  )}
+                </section>
+                <section className="panel">
+                  <div className="panel__header">
+                    <div>
+                      <span className="eyebrow">Architecture context</span>
+                      <h3>Current handoff sources</h3>
+                    </div>
+                  </div>
+                  <ul className="compact-list">
+                    <li>
+                      <strong>Snapshot bundles</strong>
+                      <span>{snapshotBundles.length} available</span>
+                    </li>
+                    <li>
+                      <strong>Logic profiles</strong>
+                      <span>{logicProfiles.length} available</span>
+                    </li>
+                  </ul>
+                </section>
+              </section>
+            ) : null}
+            {explainTab === "history" ? (
+              <section className="panel">
+                <div className="panel__header">
+                  <div>
+                    <span className="eyebrow">History</span>
+                    <h3>Explain bundle timeline</h3>
+                  </div>
+                </div>
+                {explainBundles.length ? (
+                  <ul className="compact-list">
+                    {explainBundles.map((bundle) => (
+                      <li key={bundle.id}>
+                        <strong>{bundle.label}</strong>
+                        <span>{bundle.top_file_count} files, {bundle.top_symbol_count} symbols</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="empty-copy">No explain bundles yet.</p>
+                )}
+              </section>
+            ) : null}
+          </>
+        ) : null}
+
+        {mainTab === "build" ? (
+          <>
+            <LaneHeader lane="build" actions={buildActions} />
+            {buildTab === "goal" ? (
+              <section className="vault-layout">
+                <section className="panel">
+                  <div className="panel__header">
+                    <div>
+                      <span className="eyebrow">Goal</span>
+                      <h3>Describe the deterministic build plan</h3>
+                    </div>
+                  </div>
+                  <div className="field-grid">
+                    <label className="field-grid__wide">
+                      <span>Build goal</span>
+                      <textarea rows="4" value={buildGoalDraft} onChange={(event) => setBuildGoalDraft(event.target.value)} />
+                    </label>
+                    <label className="field-grid__wide">
+                      <span>SLCS pieces</span>
+                      <input value={buildPiecesDraft} onChange={(event) => setBuildPiecesDraft(event.target.value)} placeholder="docs_cleanup_piece, summary_validator_piece" />
+                    </label>
+                  </div>
+                  <div className="hero__actions hero__actions--tight">
+                    <button className="primary-button" type="button" onClick={handleCreatePatchPreview} disabled={!!busy}>
+                      Create patch preview
+                    </button>
+                  </div>
+                </section>
+                <section className="panel">
+                  <div className="panel__header">
+                    <div>
+                      <span className="eyebrow">Inputs</span>
+                      <h3>Current Build context</h3>
+                    </div>
+                  </div>
+                  <div className="metrics-grid">
+                    <MetricCard label="Snapshot" value={latestSnapshotBundle ? 1 : 0} hint={latestSnapshotBundle?.label || "No snapshot yet"} />
+                    <MetricCard label="Logic" value={logicProfiles.length} hint={latestLogicProfile?.label || "No logic profile yet"} />
+                    <MetricCard label="Explain" value={explainBundles.length} hint={latestExplainBundle?.label || "No explain bundle yet"} />
+                    <MetricCard label="Build pieces" value={buildPiecesDraft.split(",").map((item) => item.trim()).filter(Boolean).length} hint="Selected pieces" />
+                  </div>
+                </section>
+              </section>
+            ) : null}
+            {buildTab === "preview" ? (
+              <section className="vault-layout">
+                <section className="panel">
+                  <div className="panel__header">
+                    <div>
+                      <span className="eyebrow">Patch preview</span>
+                      <h3>Latest gated Build preview</h3>
+                    </div>
+                  </div>
+                  {latestPatchPreview ? (
+                    <ul className="compact-list">
+                      <li>
+                        <strong>{latestPatchPreview.label}</strong>
+                        <span>{latestPatchPreview.copied_file_count} scoped inputs</span>
+                      </li>
+                      <li>
+                        <strong>Warnings</strong>
+                        <span>{latestPatchPreview.warning_count}</span>
+                      </li>
+                      <li>
+                        <strong>Errors</strong>
+                        <span>{latestPatchPreview.error_count}</span>
+                      </li>
+                    </ul>
+                  ) : (
+                    <p className="empty-copy">No patch preview yet.</p>
+                  )}
+                </section>
+                <section className="panel">
+                  <div className="panel__header">
+                    <div>
+                      <span className="eyebrow">Guardrails</span>
+                      <h3>Why this is safer</h3>
+                    </div>
+                  </div>
+                  <ul className="sidebar-list">
+                    <li>Only scoped files are copied into the patch preview.</li>
+                    <li>Allowed targets and forbidden paths are checked first.</li>
+                    <li>No changes go straight into the main repo.</li>
+                  </ul>
+                </section>
+              </section>
+            ) : null}
+            {buildTab === "apply" ? (
+              <section className="vault-layout">
+                <section className="panel">
+                  <div className="panel__header panel__header--spread">
+                    <div>
+                      <span className="eyebrow">Apply</span>
+                      <h3>Scratch apply and reconciliation</h3>
+                    </div>
+                    <button className="primary-button" type="button" onClick={handleApplyPatchPreview} disabled={!!busy || !latestPatchPreview}>
+                      Apply latest preview
+                    </button>
+                  </div>
+                  {latestApplyRun ? (
+                    <ul className="compact-list">
+                      <li>
+                        <strong>{latestApplyRun.label}</strong>
+                        <span>{latestApplyRun.preview_id}</span>
+                      </li>
+                      <li>
+                        <strong>Scratch apply dir</strong>
+                        <span>{latestApplyRun.scratch_apply_dir}</span>
+                      </li>
+                      <li>
+                        <strong>Rollback dir</strong>
+                        <span>{latestApplyRun.rollback_dir}</span>
+                      </li>
+                    </ul>
+                  ) : (
+                    <p className="empty-copy">No scratch apply run yet.</p>
+                  )}
+                </section>
+                <section className="panel">
+                  <div className="panel__header">
+                    <div>
+                      <span className="eyebrow">Reconciliation</span>
+                      <h3>After-apply signals</h3>
+                    </div>
+                  </div>
+                  <div className="metrics-grid">
+                    <MetricCard label="Apply runs" value={buildApplyRuns.length} hint="Scratch apply history" />
+                    <MetricCard label="Delta snapshots" value={deltaSnapshots.length} hint="Compare before and after" />
+                  </div>
+                </section>
+              </section>
+            ) : null}
+            {buildTab === "history" ? (
+              <section className="panel">
+                <div className="panel__header">
+                  <div>
+                    <span className="eyebrow">Build history</span>
+                    <h3>Patch previews and apply runs</h3>
+                  </div>
+                </div>
+                <ul className="compact-list">
+                  {buildPatchPreviews.map((preview) => (
+                    <li key={preview.id}>
+                      <strong>{preview.label}</strong>
+                      <span>{preview.warning_count} warnings / {preview.error_count} errors</span>
+                    </li>
+                  ))}
+                  {buildApplyRuns.map((run) => (
+                    <li key={run.id}>
+                      <strong>{run.label}</strong>
+                      <span>{run.preview_id}</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
           </>
         ) : null}
       </main>
