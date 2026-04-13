@@ -41,6 +41,7 @@ Instead of pointing Claude or Codex at a giant parent folder, you define a tight
 - now exposes a persisted Logic profile with import, symbol, route, and storage-touch signals built in parallel
 - can now generate explain bundles from snapshot + logic context and pass them into governed Build task packets
 - now exposes a unified history timeline plus direct comparison between snapshot bundles
+- now builds a first canonical Digital Brain index with source adapter contracts, source objects, episodes, content units, graph objects, and provenance records derived from the approved workspace
 
 ## V2 Backend Surfaces
 
@@ -95,6 +96,7 @@ Top-level lanes now include:
 - `Digital brain`
   - starts from the same approved workspace boundary as Structure
   - now has its own setup settings for scan mode, graph density, enrichment mode, and cognitive priority categories
+  - now shows the first DB2 source adapter and canonical storage foundation
   - introduces first-pass `Focus`, `Memory`, `Timeline`, and `Decisions` surfaces while reusing the existing graph and note substrate
 - current result also carries a reusable snapshot bundle for later Explain / Build-style workflows
 - the `V2 studio` panel now exposes Logic, Explain, Build, delta, apply, and history actions from the current workspace

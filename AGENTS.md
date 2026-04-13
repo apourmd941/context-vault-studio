@@ -21,6 +21,7 @@ Build a cross-platform local app that lets people:
 - generate an Obsidian-friendly vault for human navigation
 - export graph and manifest artifacts for machine retrieval
 - render an Obsidian-style WebGL graph map inside the UI
+- begin a governed Digital Brain layer with source adapters and canonical cognitive-index artifacts
 - enforce allow and block rules before any source is inspected or built
 - share the tool with others without tying it to one repo layout
 
@@ -63,6 +64,8 @@ Build a cross-platform local app that lets people:
   - graph view
   - graph search across indexed nodes
   - render-cap control for large graph scenes
+  - Digital Brain source adapter status
+  - Digital Brain canonical index status
   - path inspection
 - API endpoints:
   - `GET /api/bootstrap`
@@ -97,6 +100,9 @@ Build a cross-platform local app that lets people:
   - `GET /api/explain/bundles`
   - `GET /api/explain/bundles/{bundle_id}`
   - `POST /api/explain/bundles`
+  - `GET /api/digital-brain/contracts`
+  - `GET /api/digital-brain/indexes`
+  - `GET /api/digital-brain/indexes/{index_id}`
   - `GET /api/history/timeline`
   - `POST /api/history/compare`
   - `GET /api/build-history`

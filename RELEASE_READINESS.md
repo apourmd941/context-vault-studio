@@ -20,6 +20,7 @@ The repo now includes:
 - unified history timeline
 - compact frontend artifact panel for the v2 backend surfaces
 - true WebGL graph renderer with indexed-node search and render-cap controls
+- first Digital Brain canonical index and source adapter contract layer
 - Playwright smoke-test scaffold
 - Electron desktop scaffold
 
@@ -33,6 +34,7 @@ The repo now includes:
 - [x] docs reflect the guided demo and simplified UI
 - [x] docs reflect the v2 backend surfaces through Phase 21
 - [x] docs reflect the WebGL graph migration and large-graph behavior
+- [x] docs reflect DB1 and the first DB2 Digital Brain storage/adapter layer
 - [x] skip-CI push convention is documented in practice for this repo history
 - [x] browser smoke scaffold runs locally against the live app
 - [x] desktop packaging scaffold can produce an unpacked local app bundle

@@ -249,6 +249,19 @@ Turn the earlier Obsidian-style mapping prototype into a real shareable app with
   - cognitive priority categories
 - added an initial Decisions view with first-pass heuristic candidates so the lane has a usable destination before deeper extraction work lands
 
+## Phase 25
+
+- started DB2 by adding first-class Digital Brain source adapter contracts in the backend
+- added a persisted canonical Digital Brain index artifact with:
+  - source registry
+  - source objects
+  - episodes
+  - content units
+  - graph nodes and edges
+  - provenance ledger
+- attached that canonical index to preview and build results and exposed it through bootstrap and dedicated API endpoints
+- surfaced DB2 status in the Digital Brain setup flow so the lane now shows adapter contracts and canonical-index counts instead of only setup copy
+
 ## Verification
 
 - `python3 -m py_compile` for the shared builder

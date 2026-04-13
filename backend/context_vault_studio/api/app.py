@@ -42,6 +42,10 @@ from context_vault_studio.services.build_adapters import (
 )
 from context_vault_studio.services.build_apply import apply_build_patch_preview
 from context_vault_studio.services.build_patch_gate import create_build_patch_preview
+from context_vault_studio.services.digital_brain import (
+    build_digital_brain_index_payload,
+    list_digital_brain_source_adapter_contracts,
+)
 from context_vault_studio.services.explain_bundle import build_explain_bundle
 from context_vault_studio.services.parallel_scan import build_parallel_scan_profile
 from context_vault_studio.services.incremental_snapshot import build_delta_snapshot
@@ -73,6 +77,7 @@ from context_vault_studio.storage import (
     attach_snapshot_bundle,
     append_build_history,
     append_snapshot,
+    attach_digital_brain_index,
     delete_bookmark,
     delete_canvas,
     delete_preset,
@@ -82,6 +87,8 @@ from context_vault_studio.storage import (
     load_examples,
     load_layout,
     load_last_result,
+    load_digital_brain_index,
+    load_digital_brain_indexes,
     load_presets,
     load_snapshot_bundle,
     load_snapshot_bundles,
@@ -224,6 +231,8 @@ def bootstrap() -> dict:
         "delta_snapshots": load_delta_snapshots()[:20],
         "logic_profiles": load_logic_profiles()[:20],
         "explain_bundles": load_explain_bundles()[:20],
+        "digital_brain_indexes": load_digital_brain_indexes()[:20],
+        "digital_brain_adapter_contracts": list_digital_brain_source_adapter_contracts(),
         "build_adapter_capabilities": list_build_adapter_capabilities(),
         "canvases": load_canvases(),
         "jobs": list_jobs()[:8],
@@ -328,6 +337,24 @@ def create_explain_bundle(payload: ExplainBundleRequest) -> dict:
         raise HTTPException(status_code=404, detail="Snapshot bundle not found")
     logic_profile = load_logic_profile(payload.logic_profile_id) if payload.logic_profile_id else None
     return build_explain_bundle(snapshot, logic_profile)
+
+
+@app.get("/api/digital-brain/contracts")
+def digital_brain_contracts() -> list[dict]:
+    return list_digital_brain_source_adapter_contracts()
+
+
+@app.get("/api/digital-brain/indexes")
+def digital_brain_indexes() -> list[dict]:
+    return load_digital_brain_indexes()
+
+
+@app.get("/api/digital-brain/indexes/{index_id}")
+def digital_brain_index(index_id: str) -> dict:
+    payload = load_digital_brain_index(index_id)
+    if not payload:
+        raise HTTPException(status_code=404, detail="Digital Brain index not found")
+    return payload
 
 
 @app.get("/api/history/timeline")
@@ -579,6 +606,8 @@ def preview_workspace(request: BuildRequest) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     attach_snapshot_bundle(result)
+    result["digital_brain_index_payload"] = build_digital_brain_index_payload(result["config"], result)
+    attach_digital_brain_index(result)
     save_workspace_config(result["config"])
     return result
 
@@ -598,6 +627,8 @@ def build_workspace(request: BuildRequest) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     attach_snapshot_bundle(result)
+    result["digital_brain_index_payload"] = build_digital_brain_index_payload(result["config"], result)
+    attach_digital_brain_index(result)
     save_workspace_config(result["config"])
     save_last_result(result)
     append_build_history(

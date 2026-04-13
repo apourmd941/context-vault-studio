@@ -22,6 +22,14 @@ http://127.0.0.1:12046
 4. open `Graph` or `Notes`
 5. if you want the generated vault on disk, click `Build vault`
 
+## Digital Brain setup
+
+The `Digital brain` lane now exposes:
+
+- its own setup controls for scan mode, graph density, enrichment mode, and retention mode
+- source adapter status cards
+- a canonical index summary showing source objects, episodes, and graph counts from the latest approved-workspace intake
+
 ## Graph controls
 
 In `Graph`, the current renderer is a true WebGL 3D scene.

@@ -63,6 +63,7 @@ const EMPTY_DIGITAL_BRAIN = {
   scan_mode: "quick_start",
   graph_density: "balanced",
   enrichment_mode: "background",
+  retention_mode: "extracted_text",
   prioritize_recent_files: true,
   include_notes: true,
   include_chats: true,
@@ -811,6 +812,8 @@ export default function App() {
   const [deltaSnapshots, setDeltaSnapshots] = useState([]);
   const [logicProfiles, setLogicProfiles] = useState([]);
   const [explainBundles, setExplainBundles] = useState([]);
+  const [digitalBrainIndexes, setDigitalBrainIndexes] = useState([]);
+  const [digitalBrainAdapterContracts, setDigitalBrainAdapterContracts] = useState([]);
   const [historyTimeline, setHistoryTimeline] = useState([]);
   const [historyComparison, setHistoryComparison] = useState(null);
   const [buildGoalDraft, setBuildGoalDraft] = useState("Generate a deterministic scoped improvement plan");
@@ -857,6 +860,7 @@ export default function App() {
   const hasSources = deferredSources.length > 0;
   const hasFiles = files.length > 0;
   const recentFiles = files.slice(0, 6);
+  const latestDigitalBrainIndex = digitalBrainIndexes[0] || activeResult?.digital_brain_index || null;
   const isExploreLane = mainTab === "structure" || mainTab === "digital-brain";
   const activeExploreLane = mainTab === "digital-brain" ? "digital-brain" : "structure";
   const activeExploreTab = mainTab === "digital-brain" ? digitalBrainTab : structureTab;
@@ -881,6 +885,8 @@ export default function App() {
       setDeltaSnapshots(bootstrapPayload.delta_snapshots ?? []);
       setLogicProfiles(bootstrapPayload.logic_profiles ?? []);
       setExplainBundles(bootstrapPayload.explain_bundles ?? []);
+      setDigitalBrainIndexes(bootstrapPayload.digital_brain_indexes ?? []);
+      setDigitalBrainAdapterContracts(bootstrapPayload.digital_brain_adapter_contracts ?? []);
       setHistoryTimeline(timeline ?? []);
     });
     return bootstrapPayload;
@@ -948,6 +954,8 @@ export default function App() {
           setDeltaSnapshots(payload.delta_snapshots ?? []);
           setLogicProfiles(payload.logic_profiles ?? []);
           setExplainBundles(payload.explain_bundles ?? []);
+          setDigitalBrainIndexes(payload.digital_brain_indexes ?? []);
+          setDigitalBrainAdapterContracts(payload.digital_brain_adapter_contracts ?? []);
           setCanvases(payload.canvases ?? []);
           setSelectedCanvasId((payload.canvases ?? [])[0]?.id || "");
           setJobs(payload.jobs ?? []);
@@ -1840,27 +1848,49 @@ export default function App() {
         {isExploreLane ? (
           <>
             {activeExploreView === "setup" ? (
-              <div className="sidebar__panel">
-                <div className="panel__header">
-                  <div>
-                    <span className="eyebrow">Templates</span>
-                    <h3>Start with something that works</h3>
+              <>
+                <div className="sidebar__panel">
+                  <div className="panel__header">
+                    <div>
+                      <span className="eyebrow">Templates</span>
+                      <h3>Start with something that works</h3>
+                    </div>
+                  </div>
+                  <div className="example-stack">
+                    {examples.map((example) => (
+                      <button
+                        key={example.id}
+                        className="example-card"
+                        type="button"
+                        onClick={() => handleLoadExample(example, example.id === "guided-demo")}
+                      >
+                        <strong>{example.label}</strong>
+                        <span>{example.description}</span>
+                      </button>
+                    ))}
                   </div>
                 </div>
-                <div className="example-stack">
-                  {examples.map((example) => (
-                    <button
-                      key={example.id}
-                      className="example-card"
-                      type="button"
-                      onClick={() => handleLoadExample(example, example.id === "guided-demo")}
-                    >
-                      <strong>{example.label}</strong>
-                      <span>{example.description}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
+                {activeExploreLane === "digital-brain" ? (
+                  <div className="sidebar__panel">
+                    <span className="eyebrow">Canonical index</span>
+                    <div className="sidebar-card-stack">
+                      <div className="sidebar-card sidebar-card--static">
+                        <strong>{latestDigitalBrainIndex?.label || "No Digital Brain index yet"}</strong>
+                        <span>
+                          {latestDigitalBrainIndex
+                            ? `${latestDigitalBrainIndex.source_object_count} source objects, ${latestDigitalBrainIndex.episode_count} episodes`
+                            : "Run preview to create the first canonical index."}
+                        </span>
+                        <em>
+                          {latestDigitalBrainIndex
+                            ? `${latestDigitalBrainIndex.graph_node_count} graph nodes, ${latestDigitalBrainIndex.memory_candidate_count} memory candidates`
+                            : "Source adapters + canonical storage"}
+                        </em>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </>
             ) : null}
             {activeExploreView === "notes" ? (
               <>
@@ -2148,6 +2178,17 @@ export default function App() {
                           <option value="surface_only">Surface pass only</option>
                         </select>
                       </label>
+                      <label className="field-grid__wide">
+                        <span>Retention mode</span>
+                        <select
+                          value={config.digital_brain.retention_mode}
+                          onChange={(event) => updateDigitalBrainField("retention_mode", event.target.value)}
+                        >
+                          <option value="metadata_only">Metadata only</option>
+                          <option value="extracted_text">Extracted text</option>
+                          <option value="cached_content">Cached content</option>
+                        </select>
+                      </label>
                     </div>
                     <div className="graph-focus-group">
                       <span className="field-label">Priority categories</span>
@@ -2190,6 +2231,50 @@ export default function App() {
                     </label>
                     <p className="microcopy">
                       DB1 keeps the same approved workspace boundary as Structure, but these settings begin to steer Digital Brain toward selective, staged, high-value indexing.
+                    </p>
+                  </section>
+                ) : null}
+                {activeExploreLane === "digital-brain" ? (
+                  <section className="panel">
+                    <div className="panel__header">
+                      <div>
+                        <span className="eyebrow">DB2 foundation</span>
+                        <h3>Source adapters and canonical storage</h3>
+                      </div>
+                    </div>
+                    <div className="metrics-grid">
+                      <MetricCard label="Adapters" value={digitalBrainAdapterContracts.length} hint="Registered source adapter contracts" />
+                      <MetricCard label="Indexes" value={digitalBrainIndexes.length} hint="Saved canonical Digital Brain indexes" />
+                      <MetricCard label="Objects" value={latestDigitalBrainIndex?.source_object_count ?? 0} hint="Normalized source objects" />
+                      <MetricCard label="Episodes" value={latestDigitalBrainIndex?.episode_count ?? 0} hint="Canonical activity episodes" />
+                    </div>
+                    {digitalBrainAdapterContracts.length ? (
+                      <div className="summary-list">
+                        {digitalBrainAdapterContracts.map((contract) => (
+                          <article className="summary-card" key={contract.adapter_id}>
+                            <div className="summary-card__header">
+                              <div>
+                                <span className="eyebrow">{contract.source_type}</span>
+                                <h3>{contract.label}</h3>
+                              </div>
+                              <div className="summary-pill">{contract.status}</div>
+                            </div>
+                            <div className="microcopy">{contract.notes}</div>
+                            <div className="chip-row">
+                              {(contract.capabilities || []).map((capability) => (
+                                <span key={`${contract.adapter_id}-${capability}`} className="path-chip">
+                                  {capability}
+                                </span>
+                              ))}
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="empty-copy">No source adapter contracts are visible yet.</p>
+                    )}
+                    <p className="microcopy">
+                      DB2 stores normalized source records, episodes, content units, graph objects, and provenance in a canonical Digital Brain index attached to the current approved workspace.
                     </p>
                   </section>
                 ) : null}

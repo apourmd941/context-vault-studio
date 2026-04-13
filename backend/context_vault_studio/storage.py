@@ -37,6 +37,8 @@ LOGIC_PROFILES_DIR = STATE_DIR / "logic_profiles"
 EXPLAIN_BUNDLES_PATH = STATE_DIR / "explain_bundles.json"
 EXPLAIN_BUNDLES_DIR = STATE_DIR / "explain_bundles"
 FILE_ANALYSIS_CACHE_PATH = STATE_DIR / "file_analysis_cache.json"
+DIGITAL_BRAIN_INDEXES_PATH = STATE_DIR / "digital_brain_indexes.json"
+DIGITAL_BRAIN_INDEXES_DIR = STATE_DIR / "digital_brain_indexes"
 STARTER_CONFIG_PATH = REPO_ROOT / "configs" / "starter_workspace.json"
 GUIDED_DEMO_CONFIG_PATH = REPO_ROOT / "configs" / "guided_demo.json"
 LOCAL_NEUTRON_EXAMPLE_PATH = REPO_ROOT / "config" / "neutron_curated.example.json"
@@ -94,6 +96,7 @@ def _canonicalize_config(config: dict | None) -> dict | None:
         "scan_mode": digital_brain.get("scan_mode", "quick_start"),
         "graph_density": digital_brain.get("graph_density", "balanced"),
         "enrichment_mode": digital_brain.get("enrichment_mode", "background"),
+        "retention_mode": digital_brain.get("retention_mode", "extracted_text"),
         "prioritize_recent_files": bool(digital_brain.get("prioritize_recent_files", True)),
         "include_notes": bool(digital_brain.get("include_notes", True)),
         "include_chats": bool(digital_brain.get("include_chats", True)),
@@ -800,3 +803,65 @@ def load_file_analysis_cache() -> dict[str, dict]:
 
 def save_file_analysis_cache(cache: dict[str, dict]) -> None:
     _write_json(FILE_ANALYSIS_CACHE_PATH, cache)
+
+
+def load_digital_brain_indexes() -> list[dict]:
+    payload = _read_json(DIGITAL_BRAIN_INDEXES_PATH)
+    return payload if isinstance(payload, list) else []
+
+
+def save_digital_brain_index(payload: dict) -> dict:
+    ensure_state_dir()
+    DIGITAL_BRAIN_INDEXES_DIR.mkdir(parents=True, exist_ok=True)
+
+    index_id = payload.get("id") or str(uuid.uuid4())
+    created_at = payload.get("created_at") or _now_iso()
+    index_dir = DIGITAL_BRAIN_INDEXES_DIR / index_id
+    index_dir.mkdir(parents=True, exist_ok=True)
+
+    artifact_file = index_dir / "digital_brain_index.json"
+    artifact_file.write_text(json.dumps(payload.get("index", {}), indent=2) + "\n", encoding="utf-8")
+
+    summary = payload.get("index", {}).get("summary", {})
+    record = {
+        "id": index_id,
+        "created_at": created_at,
+        "label": payload.get("label") or "Digital Brain canonical index",
+        "index_dir": str(index_dir),
+        "artifacts": {"index_file": str(artifact_file)},
+        "source_count": int(summary.get("source_count", 0)),
+        "source_object_count": int(summary.get("source_object_count", 0)),
+        "episode_count": int(summary.get("episode_count", 0)),
+        "content_unit_count": int(summary.get("content_unit_count", 0)),
+        "graph_node_count": int(summary.get("graph_node_count", 0)),
+        "graph_edge_count": int(summary.get("graph_edge_count", 0)),
+        "memory_candidate_count": int(summary.get("memory_candidate_count", 0)),
+        "memory_count": int(summary.get("memory_count", 0)),
+    }
+
+    current = load_digital_brain_indexes()
+    next_records = [record]
+    for item in current:
+        if item.get("id") != index_id:
+            next_records.append(item)
+    _write_json(DIGITAL_BRAIN_INDEXES_PATH, next_records[:120])
+    return record
+
+
+def load_digital_brain_index(index_id: str) -> dict | None:
+    record = next((item for item in load_digital_brain_indexes() if item.get("id") == index_id), None)
+    if not record:
+        return None
+    artifact_file = Path(record["artifacts"]["index_file"])
+    payload = deepcopy(record)
+    payload["contents"] = _read_json(artifact_file)
+    return payload
+
+
+def attach_digital_brain_index(result: dict) -> dict | None:
+    payload = result.pop("digital_brain_index_payload", None)
+    if not payload:
+        return None
+    record = save_digital_brain_index(payload)
+    result["digital_brain_index"] = record
+    return record

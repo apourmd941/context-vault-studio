@@ -8,8 +8,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from context_vault_studio.services.workspace_builder import build_workspace_from_config
+from context_vault_studio.services.digital_brain import build_digital_brain_index_payload
 from context_vault_studio.storage import (
     REPO_ROOT,
+    attach_digital_brain_index,
     attach_snapshot_bundle,
     append_build_history,
     save_last_result,
@@ -85,6 +87,8 @@ def _run_job(job_id: str, kind: str, config: dict, clean: bool, worker_profile: 
             progress_callback=progress_callback,
         )
         attach_snapshot_bundle(result)
+        result["digital_brain_index_payload"] = build_digital_brain_index_payload(result["config"], result)
+        attach_digital_brain_index(result)
         save_workspace_config(result["config"])
         if kind == "build":
             save_last_result(result)

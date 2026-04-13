@@ -48,6 +48,7 @@ class DigitalBrainSettings(BaseModel):
     scan_mode: Literal["quick_start", "project_priority", "broad_cognitive_index"] = "quick_start"
     graph_density: Literal["concise", "balanced", "rich"] = "balanced"
     enrichment_mode: Literal["background", "on_demand", "surface_only"] = "background"
+    retention_mode: Literal["metadata_only", "extracted_text", "cached_content"] = "extracted_text"
     prioritize_recent_files: bool = True
     include_notes: bool = True
     include_chats: bool = True
