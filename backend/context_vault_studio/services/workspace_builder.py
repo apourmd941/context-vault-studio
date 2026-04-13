@@ -8,6 +8,7 @@ import posixpath
 import re
 import shutil
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -85,6 +86,16 @@ class SkippedRecord:
     source_name: str
     rel_path: str
     reason: str
+
+
+@dataclass
+class FileCandidate:
+    source_name: str
+    category: str
+    rel_path: str
+    original_path: str
+    mirrored_rel_path: str
+    size_bytes: int
 
 
 def now_iso() -> str:
@@ -340,7 +351,23 @@ def copy_or_link(source_file: Path, dest_file: Path, mode: str) -> None:
     shutil.copy2(source_file, dest_file)
 
 
-def scan_source(source: dict, defaults: dict) -> tuple[list[FileRecord], list[SkippedRecord]]:
+def build_file_record(candidate: FileCandidate) -> FileRecord:
+    file_path = Path(candidate.original_path)
+    return FileRecord(
+        source_name=candidate.source_name,
+        category=candidate.category,
+        rel_path=candidate.rel_path,
+        original_path=candidate.original_path,
+        mirrored_rel_path=candidate.mirrored_rel_path,
+        size_bytes=candidate.size_bytes,
+        extension=file_path.suffix.lower(),
+        is_text=is_probably_text(file_path),
+        summary=extract_summary(file_path),
+        content_hash=hash_file(file_path),
+    )
+
+
+def scan_source(source: dict, defaults: dict, progress_callback=None) -> tuple[list[FileRecord], list[SkippedRecord]]:
     source_name = source["name"]
     category = source.get("category", "Uncategorized")
     source_path = Path(source["path"]).expanduser().resolve()
@@ -358,12 +385,14 @@ def scan_source(source: dict, defaults: dict) -> tuple[list[FileRecord], list[Sk
         raise ValueError(f"Source path is not accessible: {source_path} ({reason})")
 
     slug = slugify(source_name)
+    candidates: list[FileCandidate] = []
     records: list[FileRecord] = []
     skipped: list[SkippedRecord] = []
     top_level_only = bool(include_patterns) and all(
         "/" not in normalize_pattern(pattern) for pattern in include_patterns
     )
 
+    walked_entries = 0
     for current_root, dirnames, filenames in os.walk(source_path):
         current_root_path = Path(current_root)
         rel_dir = current_root_path.relative_to(source_path)
@@ -373,6 +402,7 @@ def scan_source(source: dict, defaults: dict) -> tuple[list[FileRecord], list[Sk
 
         kept_dirs: list[str] = []
         for dirname in dirnames:
+            walked_entries += 1
             candidate_dir = (current_root_path / dirname).resolve()
             allowed, reason = evaluate_path_access(candidate_dir, access)
             if not allowed:
@@ -393,6 +423,7 @@ def scan_source(source: dict, defaults: dict) -> tuple[list[FileRecord], list[Sk
         dirnames[:] = kept_dirs
 
         for filename in sorted(filenames):
+            walked_entries += 1
             file_path = current_root_path / filename
             rel_path = file_path.relative_to(source_path).as_posix()
             allowed, reason = evaluate_path_access(file_path.resolve(), access)
@@ -421,20 +452,47 @@ def scan_source(source: dict, defaults: dict) -> tuple[list[FileRecord], list[Sk
                 skipped.append(SkippedRecord(source_name, rel_path, "too_large"))
                 continue
 
-            records.append(
-                FileRecord(
+            candidates.append(
+                FileCandidate(
                     source_name=source_name,
                     category=category,
                     rel_path=rel_path,
                     original_path=str(file_path),
                     mirrored_rel_path=(Path("Sources") / slug / rel_path).as_posix(),
                     size_bytes=size_bytes,
-                    extension=file_path.suffix.lower(),
-                    is_text=is_probably_text(file_path),
-                    summary=extract_summary(file_path),
-                    content_hash=hash_file(file_path),
                 )
             )
+
+            if progress_callback and len(candidates) % 200 == 0:
+                progress_callback(
+                    {
+                        "message": f"Scanning {source_name}: discovered {len(candidates)} files",
+                        "fraction": 0.15,
+                    }
+                )
+
+    if not candidates:
+        if progress_callback:
+            progress_callback({"message": f"Scanning {source_name}: no files matched", "fraction": 1.0})
+        return records, skipped
+
+    max_workers = min(8, max(1, os.cpu_count() or 4), len(candidates))
+    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="context-vault-scan") as executor:
+        future_map = {executor.submit(build_file_record, candidate): candidate.rel_path for candidate in candidates}
+        completed = 0
+        total = len(candidates)
+        for future in as_completed(future_map):
+            records.append(future.result())
+            completed += 1
+            if progress_callback and (completed == total or completed % 200 == 0):
+                progress_callback(
+                    {
+                        "message": f"Scanning {source_name}: analyzed {completed}/{total} files",
+                        "fraction": 0.15 + (completed / total) * 0.85,
+                    }
+                )
+
+    records.sort(key=lambda item: item.rel_path)
 
     return records, skipped
 
@@ -794,14 +852,29 @@ def build_workspace_from_config(
 
     total_sources = max(len(source_specs), 1)
     for source_index, source in enumerate(source_specs, start=1):
+        source_progress_start = 10 + int(((source_index - 1) / total_sources) * 55)
+        source_progress_end = 10 + int((source_index / total_sources) * 55)
+
+        def source_progress(detail: dict) -> None:
+            if not progress_callback:
+                return
+            fraction = max(0.0, min(1.0, float(detail.get("fraction", 0.0))))
+            mapped_progress = source_progress_start + int((source_progress_end - source_progress_start) * fraction)
+            progress_callback(
+                {
+                    "progress": mapped_progress,
+                    "message": detail.get("message", f"Scanning {source['name']}"),
+                }
+            )
+
         if progress_callback:
             progress_callback(
                 {
-                    "progress": 10 + int(((source_index - 1) / total_sources) * 55),
+                    "progress": source_progress_start,
                     "message": f"Scanning {source['name']}",
                 }
             )
-        records, skipped = scan_source(source, defaults)
+        records, skipped = scan_source(source, defaults, progress_callback=source_progress)
         summary = summarize_source(
             source,
             records,
