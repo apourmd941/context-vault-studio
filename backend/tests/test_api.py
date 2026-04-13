@@ -12,6 +12,18 @@ def make_client(tmp_path: Path, monkeypatch):
     return TestClient(app)
 
 
+def test_native_dialog_endpoint_can_be_mocked(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("CONTEXT_VAULT_STATE_DIR", str(tmp_path / "state"))
+    import context_vault_studio.api.app as app_module
+
+    monkeypatch.setattr(app_module, "_run_native_path_dialog", lambda kind: str(tmp_path / ("chosen" if kind == "directory" else "file.txt")))
+    client = TestClient(app_module.app)
+
+    response = client.post("/api/native-dialog/path", json={"kind": "directory"})
+    assert response.status_code == 200
+    assert response.json()["path"].endswith("chosen")
+
+
 def test_preview_and_build_round_trip(tmp_path: Path, monkeypatch) -> None:
     source_dir = tmp_path / "docs"
     source_dir.mkdir()

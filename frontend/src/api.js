@@ -186,6 +186,13 @@ export function exportBundle() {
   });
 }
 
+export function chooseNativePath(kind = "directory") {
+  return request("/api/native-dialog/path", {
+    method: "POST",
+    body: JSON.stringify({ kind }),
+  });
+}
+
 export function createLogicProfile(config, maxWorkers = 4) {
   return request("/api/logic/profile", {
     method: "POST",

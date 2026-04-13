@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import mimetypes
+import platform
 import re
+import subprocess
 import uuid
 import zipfile
 from pathlib import Path
@@ -20,6 +22,7 @@ from context_vault_studio.models import (
     FileCreateRequest,
     FilePreviewRequest,
     FileSaveRequest,
+    NativeDialogRequest,
     InspectPathRequest,
     JobRequest,
     LayoutPayload,
@@ -120,9 +123,82 @@ app.add_middleware(
 )
 
 
+def _run_native_path_dialog(kind: str) -> str:
+    system = platform.system()
+
+    if system == "Darwin":
+        command = [
+            "osascript",
+            "-e",
+            'POSIX path of (choose folder with prompt "Choose a folder or disk")'
+            if kind == "directory"
+            else 'POSIX path of (choose file with prompt "Choose a file")',
+        ]
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip() or "Native dialog cancelled"
+            raise RuntimeError(detail)
+        return result.stdout.strip()
+
+    if system == "Windows":
+        powershell = (
+            "Add-Type -AssemblyName System.Windows.Forms; "
+            "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog; "
+            "$dialog.Description = 'Choose a folder or disk'; "
+            "$dialog.UseDescriptionForTitle = $true; "
+            "if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) "
+            "{ Write-Output $dialog.SelectedPath }"
+        )
+        if kind == "file":
+            powershell = (
+                "Add-Type -AssemblyName System.Windows.Forms; "
+                "$dialog = New-Object System.Windows.Forms.OpenFileDialog; "
+                "if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) "
+                "{ Write-Output $dialog.FileName }"
+            )
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", powershell],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            detail = (result.stderr or result.stdout or "").strip() or "Native dialog cancelled"
+            raise RuntimeError(detail)
+        return result.stdout.strip()
+
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except Exception as exc:  # pragma: no cover
+        raise RuntimeError("Native dialog is not available on this system") from exc
+
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    try:
+        if kind == "file":
+            selected = filedialog.askopenfilename(parent=root)
+        else:
+            selected = filedialog.askdirectory(parent=root, mustexist=True)
+    finally:
+        root.destroy()
+    if not selected:
+        raise RuntimeError("Native dialog cancelled")
+    return selected
+
+
 @app.get("/api/health")
 def health() -> dict:
     return {"status": "ok", "app_id": APP_ID}
+
+
+@app.post("/api/native-dialog/path")
+def native_dialog_path(payload: NativeDialogRequest) -> dict:
+    try:
+        return {"path": _run_native_path_dialog(payload.kind)}
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/bootstrap")

@@ -13,6 +13,7 @@ import {
   createJob,
   createDeltaSnapshot,
   createExplainBundle,
+  chooseNativePath,
   createLogicProfile,
   createParallelScanProfile,
   createPatchPreview,
@@ -49,7 +50,7 @@ const EMPTY_SOURCE = {
   name: "",
   category: "Projects",
   path: "",
-  include: ["README.md"],
+  include: [],
   exclude: [],
   mode: "copy",
   max_file_size_bytes: "",
@@ -95,7 +96,7 @@ const LANE_COPY = {
     eyebrow: "Structure mapper",
     title: "Map the files and folders you want the app to understand.",
     description:
-      "Use Structure to choose allowed sources, preview the graph, inspect notes, and review how the scoped workspace changes over time.",
+      "Use Structure to choose allowed folders or disks, preview the graph, inspect notes, and review how the scoped workspace changes over time.",
   },
   logic: {
     eyebrow: "Code mapper",
@@ -290,9 +291,9 @@ function QuickStartPanel({
     {
       label: "1. Start with content",
       description: hasSources
-        ? `${hasSources} source${hasSources > 1 ? "s" : ""} already in the workspace.`
-        : "Load the bundled demo or add your own first source.",
-      actionLabel: demoExample ? "Load guided demo" : "Add first source",
+        ? `${hasSources} folder${hasSources > 1 ? "s" : ""} already in the workspace.`
+        : "Load the bundled demo or add your first folder or disk.",
+      actionLabel: demoExample ? "Load guided demo" : "Add folder",
       action: demoExample ? onLoadDemo : onAddSource,
       primary: true,
     },
@@ -499,7 +500,7 @@ function SourceCard({
   index,
   onChange,
   onRemove,
-  onInspect,
+  onBrowse,
   inspectResult,
   inspectBusy,
 }) {
@@ -515,8 +516,8 @@ function SourceCard({
     <article className="source-card">
       <div className="source-card__header">
         <div>
-          <span className="eyebrow">Source {index + 1}</span>
-          <h3>{source.name || "Untitled source"}</h3>
+          <span className="eyebrow">Folder / disk {index + 1}</span>
+          <h3>{source.name || "Untitled folder / disk"}</h3>
         </div>
         <button className="ghost-button" type="button" onClick={() => onRemove(index)}>
           Remove
@@ -525,7 +526,7 @@ function SourceCard({
 
       <div className="field-grid">
         <label>
-          <span>Name</span>
+          <span>Label</span>
           <input
             value={source.name}
             onChange={(event) => onChange(index, "name", event.target.value)}
@@ -541,7 +542,7 @@ function SourceCard({
           />
         </label>
         <label className="field-grid__wide">
-          <span>Path</span>
+          <span>Folder / disk path</span>
           <div className="path-field">
             <input
               value={source.path}
@@ -551,10 +552,10 @@ function SourceCard({
             <button
               className="secondary-button"
               type="button"
-              onClick={() => onInspect(index)}
-              disabled={!source.path || inspectBusy}
+              onClick={() => onBrowse(index)}
+              disabled={inspectBusy}
             >
-              {inspectBusy ? "Peeking..." : "Peek path"}
+              Browse
             </button>
           </div>
         </label>
@@ -809,7 +810,7 @@ export default function App() {
             setNotice(
               (payload.config?.sources ?? []).length
                 ? "Preview the current demo workspace to populate Notes, Canvas, and Graph."
-                : "Load the guided demo or add a source to get a first working result.",
+                : "Load the guided demo or add a folder or disk to get a first working result.",
             );
           }
         });
@@ -975,8 +976,19 @@ export default function App() {
     patchConfig({ ...config, sources: nextSources });
   }
 
-  function addSource() {
-    patchConfig({ ...config, sources: [...config.sources, { ...EMPTY_SOURCE }] });
+  function upsertSourceFromPath(index, pathValue) {
+    const pathParts = pathValue.split("/").filter(Boolean);
+    const fallbackName = pathParts[pathParts.length - 1] || "Selected folder";
+    const nextSources = config.sources.map((source, sourceIndex) =>
+      sourceIndex === index
+        ? {
+            ...source,
+            path: pathValue,
+            name: source.name?.trim() ? source.name : fallbackName,
+          }
+        : source,
+    );
+    patchConfig({ ...config, sources: nextSources });
   }
 
   function removeSource(index) {
@@ -997,31 +1009,70 @@ export default function App() {
 
   function validateWorkspaceRun(nextConfig) {
     if (!nextConfig.sources.length) {
-      return "Load the guided demo or add at least one source before running preview or build.";
+      return "Load the guided demo or add at least one folder or disk before running preview or build.";
     }
 
     const incompleteSource = nextConfig.sources.find((source) => !source.path?.trim() || !source.name?.trim());
     if (incompleteSource) {
-      return "Each source needs both a name and a folder path before preview or build can run.";
+      return "Each folder or disk entry needs both a label and a path before preview or build can run.";
     }
 
     return "";
   }
 
-  async function handleInspect(index) {
-    const source = config.sources[index];
-    if (!source?.path) {
-      return;
+  async function handleBrowseOutputDirectory() {
+    setError("");
+    try {
+      const payload = await chooseNativePath("directory");
+      if (!payload.path) {
+        return;
+      }
+      updateField("output_dir", payload.path);
+    } catch (browseError) {
+      setError(browseError.message);
     }
+  }
+
+  async function handleBrowseFolder(index) {
     setInspectBusyIndex(index);
     setError("");
     try {
-      const payload = await inspectPath(source.path, config.access);
-      setInspectResults((current) => ({ ...current, [index]: payload }));
-    } catch (inspectError) {
-      setError(inspectError.message);
+      const payload = await chooseNativePath("directory");
+      if (!payload.path) {
+        return;
+      }
+      upsertSourceFromPath(index, payload.path);
+      const inspectPayload = await inspectPath(payload.path, config.access);
+      setInspectResults((current) => ({ ...current, [index]: inspectPayload }));
+    } catch (browseError) {
+      setError(browseError.message);
     } finally {
       setInspectBusyIndex(-1);
+    }
+  }
+
+  async function handleAddFolderByBrowse() {
+    setError("");
+    try {
+      const payload = await chooseNativePath("directory");
+      if (!payload.path) {
+        return;
+      }
+      const pathParts = payload.path.split("/").filter(Boolean);
+      const fallbackName = pathParts[pathParts.length - 1] || "Selected folder";
+      patchConfig({
+        ...config,
+        sources: [
+          ...config.sources,
+          {
+            ...EMPTY_SOURCE,
+            name: fallbackName,
+            path: payload.path,
+          },
+        ],
+      });
+    } catch (browseError) {
+      setError(browseError.message);
     }
   }
 
@@ -1504,8 +1555,8 @@ export default function App() {
 
   const structureActions = (
     <>
-      <button className="secondary-button" type="button" onClick={addSource} disabled={!!busy}>
-        Add source
+      <button className="secondary-button" type="button" onClick={handleAddFolderByBrowse} disabled={!!busy}>
+        Add folder
       </button>
       <button className="secondary-button" type="button" onClick={() => startWorkspaceJob("preview")} disabled={!!busy}>
         {busy === "preview" ? "Previewing..." : "Preview"}
@@ -1758,7 +1809,7 @@ export default function App() {
                 ) : (
                   <EmptyTabState
                     title="No workspace result yet"
-                    body="Load the guided demo from Templates or add a source, then preview to populate Structure."
+                    body="Load the guided demo from Templates or add a folder or disk, then preview to populate Structure."
                     actions={[
                       guidedDemo ? { label: "Load guided demo", onClick: () => handleLoadExample(guidedDemo, true), primary: true } : null,
                       { label: "Run preview", onClick: () => startWorkspaceJob("preview") },
@@ -1772,8 +1823,8 @@ export default function App() {
                       <h3>Choose the folders Structure is allowed to map</h3>
                     </div>
                     <div className="hero__actions hero__actions--tight">
-                      <button className="primary-button" type="button" onClick={addSource}>
-                        Add source
+                      <button className="primary-button" type="button" onClick={handleAddFolderByBrowse}>
+                        Add folder
                       </button>
                       <button className="ghost-button" type="button" onClick={() => openStructureTab("advanced")}>
                         Advanced
@@ -1789,7 +1840,7 @@ export default function App() {
                           index={index}
                           onChange={updateSource}
                           onRemove={removeSource}
-                          onInspect={handleInspect}
+                          onBrowse={handleBrowseFolder}
                           inspectResult={inspectResults[index]}
                           inspectBusy={inspectBusyIndex === index}
                         />
@@ -1798,7 +1849,7 @@ export default function App() {
                   ) : (
                     <EmptyTabState
                       title="Nothing has been scoped yet"
-                      body="Load the guided demo if you want something that works immediately, or add your own first source folder."
+                      body="Load the guided demo if you want something that works immediately, or add your own folder or disk."
                       actions={[
                         guidedDemo
                           ? {
@@ -1806,8 +1857,8 @@ export default function App() {
                               onClick: () => handleLoadExample(guidedDemo, true),
                               primary: true,
                             }
-                          : { label: "Add first source", onClick: addSource, primary: true },
-                        { label: "Add first source", onClick: addSource },
+                          : { label: "Add folder", onClick: handleAddFolderByBrowse, primary: true },
+                        { label: "Add folder", onClick: handleAddFolderByBrowse },
                       ]}
                     />
                   )}
@@ -1832,11 +1883,16 @@ export default function App() {
                     </label>
                     <label>
                       <span>Folder to save graphs and builds</span>
-                      <input
-                        value={config.output_dir}
-                        onChange={(event) => updateField("output_dir", event.target.value)}
-                        placeholder="../build/context-vault-studio"
-                      />
+                      <div className="path-field">
+                        <input
+                          value={config.output_dir}
+                          onChange={(event) => updateField("output_dir", event.target.value)}
+                          placeholder="../build/context-vault-studio"
+                        />
+                        <button className="secondary-button" type="button" onClick={handleBrowseOutputDirectory}>
+                          Browse
+                        </button>
+                      </div>
                     </label>
                     <label>
                       <span>Default mode</span>

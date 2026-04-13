@@ -143,6 +143,10 @@ class FilePreviewRequest(BaseModel):
     access: AccessPolicy | None = None
 
 
+class NativeDialogRequest(BaseModel):
+    kind: Literal["directory", "file"] = "directory"
+
+
 class BuildTaskRequest(BaseModel):
     goal: str = Field(..., min_length=1)
     snapshot_bundle_id: str | None = None
