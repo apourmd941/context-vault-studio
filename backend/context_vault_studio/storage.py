@@ -36,6 +36,7 @@ LOGIC_PROFILES_PATH = STATE_DIR / "logic_profiles.json"
 LOGIC_PROFILES_DIR = STATE_DIR / "logic_profiles"
 EXPLAIN_BUNDLES_PATH = STATE_DIR / "explain_bundles.json"
 EXPLAIN_BUNDLES_DIR = STATE_DIR / "explain_bundles"
+FILE_ANALYSIS_CACHE_PATH = STATE_DIR / "file_analysis_cache.json"
 STARTER_CONFIG_PATH = REPO_ROOT / "configs" / "starter_workspace.json"
 GUIDED_DEMO_CONFIG_PATH = REPO_ROOT / "configs" / "guided_demo.json"
 LOCAL_NEUTRON_EXAMPLE_PATH = REPO_ROOT / "config" / "neutron_curated.example.json"
@@ -88,6 +89,16 @@ def _canonicalize_config(config: dict | None) -> dict | None:
     }
     normalized["default_exclude"] = sorted(normalized.get("default_exclude", []))
     normalized["default_include"] = sorted(normalized.get("default_include", []))
+    digital_brain = normalized.get("digital_brain", {})
+    normalized["digital_brain"] = {
+        "scan_mode": digital_brain.get("scan_mode", "quick_start"),
+        "graph_density": digital_brain.get("graph_density", "balanced"),
+        "enrichment_mode": digital_brain.get("enrichment_mode", "background"),
+        "prioritize_recent_files": bool(digital_brain.get("prioritize_recent_files", True)),
+        "include_notes": bool(digital_brain.get("include_notes", True)),
+        "include_chats": bool(digital_brain.get("include_chats", True)),
+        "priority_categories": sorted(digital_brain.get("priority_categories", [])),
+    }
     normalized["sources"] = sorted(
         [
             {
@@ -780,3 +791,12 @@ def load_last_result() -> dict | None:
 
 def save_last_result(result: dict) -> None:
     _write_json(LAST_RESULT_PATH, result)
+
+
+def load_file_analysis_cache() -> dict[str, dict]:
+    payload = _read_json(FILE_ANALYSIS_CACHE_PATH)
+    return payload if isinstance(payload, dict) else {}
+
+
+def save_file_analysis_cache(cache: dict[str, dict]) -> None:
+    _write_json(FILE_ANALYSIS_CACHE_PATH, cache)

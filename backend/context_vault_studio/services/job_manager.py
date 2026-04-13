@@ -37,7 +37,7 @@ def get_job(job_id: str) -> dict | None:
         return deepcopy(job) if job else None
 
 
-def create_job(*, kind: str, config: dict, clean: bool) -> dict:
+def create_job(*, kind: str, config: dict, clean: bool, worker_profile: str = "default") -> dict:
     job_id = str(uuid.uuid4())
     now = _now_iso()
     job = {
@@ -46,6 +46,7 @@ def create_job(*, kind: str, config: dict, clean: bool) -> dict:
         "status": "queued",
         "progress": 0,
         "message": "Queued",
+        "worker_profile": worker_profile,
         "created_at": now,
         "updated_at": now,
         "result": None,
@@ -53,7 +54,7 @@ def create_job(*, kind: str, config: dict, clean: bool) -> dict:
     }
     with _lock:
         _jobs[job_id] = job
-    _executor.submit(_run_job, job_id, kind, deepcopy(config), clean)
+    _executor.submit(_run_job, job_id, kind, deepcopy(config), clean, worker_profile)
     return deepcopy(job)
 
 
@@ -64,7 +65,7 @@ def _update_job(job_id: str, **patch: object) -> None:
         job["updated_at"] = _now_iso()
 
 
-def _run_job(job_id: str, kind: str, config: dict, clean: bool) -> None:
+def _run_job(job_id: str, kind: str, config: dict, clean: bool, worker_profile: str) -> None:
     def progress_callback(progress: dict) -> None:
         _update_job(
             job_id,
@@ -80,6 +81,7 @@ def _run_job(job_id: str, kind: str, config: dict, clean: bool) -> None:
             base_dir=Path(REPO_ROOT),
             dry_run=(kind == "preview"),
             clean=clean,
+            worker_profile=worker_profile,
             progress_callback=progress_callback,
         )
         attach_snapshot_bundle(result)

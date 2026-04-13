@@ -311,6 +311,10 @@ code,
   background: rgba(255, 143, 143, 0.16);
 }
 
+.window-tab--digital-brain.window-tab--active {
+  background: rgba(137, 224, 255, 0.16);
+}
+
 .hero {
   display: flex;
   justify-content: space-between;
@@ -358,6 +362,12 @@ code,
 .view-header--build {
   background:
     radial-gradient(circle at top right, rgba(255, 143, 143, 0.14), transparent 24%),
+    linear-gradient(180deg, rgba(19, 22, 30, 0.94), rgba(12, 15, 21, 0.96));
+}
+
+.view-header--digital-brain {
+  background:
+    radial-gradient(circle at top right, rgba(137, 224, 255, 0.14), transparent 24%),
     linear-gradient(180deg, rgba(19, 22, 30, 0.94), rgba(12, 15, 21, 0.96));
 }
 
@@ -1088,15 +1098,83 @@ select:focus {
   grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
 }
 
-.graph-legend {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 14px;
+.graph-focus-panel {
+  display: grid;
+  gap: 12px;
   padding: 12px 14px;
   border-radius: var(--radius-md);
   background: rgba(16, 19, 26, 0.74);
+  border: 1px solid rgba(155, 140, 255, 0.1);
+}
+
+.graph-focus-panel__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+}
+
+.graph-focus-group {
+  display: grid;
+  gap: 8px;
+}
+
+.graph-focus-group__title {
   color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.graph-focus-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.graph-focus-chip-row--scroll {
+  max-height: 132px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.graph-focus-chip {
+  --graph-chip-accent: rgba(190, 196, 224, 0.9);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid rgba(155, 140, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(12, 15, 22, 0.74);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.graph-focus-chip .legend-dot {
+  width: 9px;
+  height: 9px;
+  margin-right: 0;
+  background: var(--graph-chip-accent);
+}
+
+.graph-focus-chip strong {
+  color: var(--ink);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.graph-focus-chip span {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+}
+
+.graph-focus-chip--active {
+  border-color: color-mix(in srgb, var(--graph-chip-accent) 58%, rgba(255, 255, 255, 0.18));
+  background: color-mix(in srgb, var(--graph-chip-accent) 18%, rgba(12, 15, 22, 0.88));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.graph-focus-chip:hover {
+  transform: translateY(-1px);
 }
 
 .graph-toolbar__search {

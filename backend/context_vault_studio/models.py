@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from context_vault_studio.services.worker_policy import ABSOLUTE_WORKER_CAP, DEFAULT_WORKER_COUNT
+
 
 DEFAULT_EXCLUDE = [
     ".DS_Store",
@@ -42,6 +44,18 @@ class AccessPolicy(BaseModel):
     enforce_copy_mode: bool = True
 
 
+class DigitalBrainSettings(BaseModel):
+    scan_mode: Literal["quick_start", "project_priority", "broad_cognitive_index"] = "quick_start"
+    graph_density: Literal["concise", "balanced", "rich"] = "balanced"
+    enrichment_mode: Literal["background", "on_demand", "surface_only"] = "background"
+    prioritize_recent_files: bool = True
+    include_notes: bool = True
+    include_chats: bool = True
+    priority_categories: list[str] = Field(
+        default_factory=lambda: ["conversations", "documents", "memories", "decisions", "topics"]
+    )
+
+
 class WorkspaceConfig(BaseModel):
     vault_name: str = "Context Vault Studio"
     output_dir: str = "./build/context-vault-studio"
@@ -50,18 +64,21 @@ class WorkspaceConfig(BaseModel):
     default_exclude: list[str] = Field(default_factory=lambda: list(DEFAULT_EXCLUDE))
     default_include: list[str] = Field(default_factory=list)
     access: AccessPolicy = Field(default_factory=AccessPolicy)
+    digital_brain: DigitalBrainSettings = Field(default_factory=DigitalBrainSettings)
     sources: list[SourceConfig] = Field(default_factory=list)
 
 
 class BuildRequest(BaseModel):
     config: WorkspaceConfig
     clean: bool = True
+    worker_profile: Literal["default", "aggressive"] = "default"
 
 
 class JobRequest(BaseModel):
     kind: Literal["preview", "build"]
     config: WorkspaceConfig
     clean: bool = True
+    worker_profile: Literal["default", "aggressive"] = "default"
 
 
 class PresetPayload(BaseModel):
@@ -162,7 +179,7 @@ class BuildTaskRequest(BaseModel):
 
 class ParallelScanRequest(BaseModel):
     config: WorkspaceConfig
-    max_workers: int = Field(default=4, ge=1, le=16)
+    max_workers: int = Field(default=DEFAULT_WORKER_COUNT, ge=1, le=ABSOLUTE_WORKER_CAP)
 
 
 class DeltaSnapshotRequest(BaseModel):
@@ -177,7 +194,7 @@ class LiveMonitorRequest(BaseModel):
 
 class LogicProfileRequest(BaseModel):
     config: WorkspaceConfig
-    max_workers: int = Field(default=4, ge=1, le=16)
+    max_workers: int = Field(default=DEFAULT_WORKER_COUNT, ge=1, le=ABSOLUTE_WORKER_CAP)
 
 
 class ExplainBundleRequest(BaseModel):

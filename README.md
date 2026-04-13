@@ -69,6 +69,14 @@ The backend now also includes the first v2 governance and analysis layers:
 
 The app now opens with a simpler `Vault` home first.
 
+Top-level lanes now include:
+
+- `Structure`
+- `Logic`
+- `Explain`
+- `Build`
+- `Digital brain`
+
 - `Vault`
   - basic mode by default
   - load a guided demo, add a source, preview, or build
@@ -84,6 +92,10 @@ The app now opens with a simpler `Vault` home first.
   - orbit, pan, zoom, and drag nodes directly
   - search indexed files even when only a render-capped subset is visible
   - jump back into notes from selected nodes
+- `Digital brain`
+  - starts from the same approved workspace boundary as Structure
+  - now has its own setup settings for scan mode, graph density, enrichment mode, and cognitive priority categories
+  - introduces first-pass `Focus`, `Memory`, `Timeline`, and `Decisions` surfaces while reusing the existing graph and note substrate
 - current result also carries a reusable snapshot bundle for later Explain / Build-style workflows
 - the `V2 studio` panel now exposes Logic, Explain, Build, delta, apply, and history actions from the current workspace
 

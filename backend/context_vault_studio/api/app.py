@@ -542,7 +542,12 @@ def job(job_id: str) -> dict:
 
 @app.post("/api/jobs")
 def enqueue_job(payload: JobRequest) -> dict:
-    return create_job(kind=payload.kind, config=payload.config.model_dump(), clean=payload.clean)
+    return create_job(
+        kind=payload.kind,
+        config=payload.config.model_dump(),
+        clean=payload.clean,
+        worker_profile=payload.worker_profile,
+    )
 
 
 @app.put("/api/workspace-config")
@@ -568,6 +573,7 @@ def preview_workspace(request: BuildRequest) -> dict:
             base_dir=REPO_ROOT,
             dry_run=True,
             clean=request.clean,
+            worker_profile=request.worker_profile,
         )
     except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -586,6 +592,7 @@ def build_workspace(request: BuildRequest) -> dict:
             base_dir=REPO_ROOT,
             dry_run=False,
             clean=request.clean,
+            worker_profile=request.worker_profile,
         )
     except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

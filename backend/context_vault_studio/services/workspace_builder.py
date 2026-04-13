@@ -7,6 +7,7 @@ import os
 import posixpath
 import re
 import shutil
+import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
@@ -14,6 +15,9 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
+
+from context_vault_studio.services.worker_policy import clamp_worker_count, reserve_worker_budget
+from context_vault_studio.storage import load_file_analysis_cache, save_file_analysis_cache
 
 
 TEXT_EXTENSIONS = {
@@ -96,6 +100,7 @@ class FileCandidate:
     original_path: str
     mirrored_rel_path: str
     size_bytes: int
+    mtime_ns: int
 
 
 def now_iso() -> str:
@@ -352,7 +357,49 @@ def copy_or_link(source_file: Path, dest_file: Path, mode: str) -> None:
 
 
 def build_file_record(candidate: FileCandidate) -> FileRecord:
+    return build_file_record_with_cache(candidate, {}, {}, None)
+
+
+def build_file_record_with_cache(
+    candidate: FileCandidate,
+    analysis_cache: dict[str, dict],
+    cache_updates: dict[str, dict],
+    cache_lock: threading.Lock | None,
+) -> FileRecord:
     file_path = Path(candidate.original_path)
+    cached = analysis_cache.get(candidate.original_path)
+    if cached and cached.get("mtime_ns") == candidate.mtime_ns and cached.get("size_bytes") == candidate.size_bytes:
+        return FileRecord(
+            source_name=candidate.source_name,
+            category=candidate.category,
+            rel_path=candidate.rel_path,
+            original_path=candidate.original_path,
+            mirrored_rel_path=candidate.mirrored_rel_path,
+            size_bytes=candidate.size_bytes,
+            extension=str(cached.get("extension", file_path.suffix.lower())),
+            is_text=bool(cached.get("is_text", False)),
+            summary=str(cached.get("summary", "")),
+            content_hash=str(cached.get("content_hash", "")),
+        )
+
+    extension = file_path.suffix.lower()
+    is_text = is_probably_text(file_path)
+    summary = extract_summary(file_path)
+    content_hash = hash_file(file_path)
+    cache_payload = {
+        "mtime_ns": candidate.mtime_ns,
+        "size_bytes": candidate.size_bytes,
+        "extension": extension,
+        "is_text": is_text,
+        "summary": summary,
+        "content_hash": content_hash,
+    }
+    if cache_lock is not None:
+        with cache_lock:
+            cache_updates[candidate.original_path] = cache_payload
+    else:
+        cache_updates[candidate.original_path] = cache_payload
+
     return FileRecord(
         source_name=candidate.source_name,
         category=candidate.category,
@@ -360,14 +407,23 @@ def build_file_record(candidate: FileCandidate) -> FileRecord:
         original_path=candidate.original_path,
         mirrored_rel_path=candidate.mirrored_rel_path,
         size_bytes=candidate.size_bytes,
-        extension=file_path.suffix.lower(),
-        is_text=is_probably_text(file_path),
-        summary=extract_summary(file_path),
-        content_hash=hash_file(file_path),
+        extension=extension,
+        is_text=is_text,
+        summary=summary,
+        content_hash=content_hash,
     )
 
 
-def scan_source(source: dict, defaults: dict, progress_callback=None) -> tuple[list[FileRecord], list[SkippedRecord]]:
+def scan_source(
+    source: dict,
+    defaults: dict,
+    *,
+    worker_count: int | None = None,
+    analysis_cache: dict[str, dict] | None = None,
+    cache_updates: dict[str, dict] | None = None,
+    cache_lock: threading.Lock | None = None,
+    progress_callback=None,
+) -> tuple[list[FileRecord], list[SkippedRecord]]:
     source_name = source["name"]
     category = source.get("category", "Uncategorized")
     source_path = Path(source["path"]).expanduser().resolve()
@@ -444,7 +500,8 @@ def scan_source(source: dict, defaults: dict, progress_callback=None) -> tuple[l
                 skipped.append(SkippedRecord(source_name, rel_path, "symlink"))
                 continue
             try:
-                size_bytes = file_path.stat().st_size
+                stat_result = file_path.stat()
+                size_bytes = stat_result.st_size
             except OSError:
                 skipped.append(SkippedRecord(source_name, rel_path, "unreadable"))
                 continue
@@ -460,6 +517,7 @@ def scan_source(source: dict, defaults: dict, progress_callback=None) -> tuple[l
                     original_path=str(file_path),
                     mirrored_rel_path=(Path("Sources") / slug / rel_path).as_posix(),
                     size_bytes=size_bytes,
+                    mtime_ns=stat_result.st_mtime_ns,
                 )
             )
 
@@ -476,9 +534,14 @@ def scan_source(source: dict, defaults: dict, progress_callback=None) -> tuple[l
             progress_callback({"message": f"Scanning {source_name}: no files matched", "fraction": 1.0})
         return records, skipped
 
-    max_workers = min(8, max(1, os.cpu_count() or 4), len(candidates))
+    max_workers = min(clamp_worker_count(worker_count), len(candidates))
+    cache_source = analysis_cache or {}
+    cache_target = cache_updates if cache_updates is not None else {}
     with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="context-vault-scan") as executor:
-        future_map = {executor.submit(build_file_record, candidate): candidate.rel_path for candidate in candidates}
+        future_map = {
+            executor.submit(build_file_record_with_cache, candidate, cache_source, cache_target, cache_lock): candidate.rel_path
+            for candidate in candidates
+        }
         completed = 0
         total = len(candidates)
         for future in as_completed(future_map):
@@ -495,6 +558,27 @@ def scan_source(source: dict, defaults: dict, progress_callback=None) -> tuple[l
     records.sort(key=lambda item: item.rel_path)
 
     return records, skipped
+
+
+def split_worker_counts(total_workers: int, group_count: int) -> list[int]:
+    if group_count <= 0:
+        return []
+    base, remainder = divmod(max(1, total_workers), group_count)
+    return [max(1, base + (1 if index < remainder else 0)) for index in range(group_count)]
+
+
+def source_execution_plan(total_workers: int, source_count: int) -> tuple[int, list[int]]:
+    if source_count <= 1:
+        return 1, [max(1, total_workers)]
+
+    if total_workers >= 6:
+        source_workers = min(source_count, max(2, min(3, total_workers // 3)))
+    else:
+        source_workers = min(source_count, max(1, total_workers // 2))
+
+    source_workers = max(1, source_workers)
+    scan_budget = max(source_workers, total_workers - source_workers)
+    return source_workers, split_worker_counts(scan_budget, source_workers)
 
 
 def summarize_source(
@@ -817,6 +901,9 @@ def build_workspace_from_config(
     base_dir: Path,
     dry_run: bool,
     clean: bool,
+    worker_profile: str = "default",
+    worker_count: int | None = None,
+    parallel_output: bool | None = None,
     progress_callback=None,
 ) -> dict:
     normalized = resolve_config_paths(config, base_dir=base_dir)
@@ -849,38 +936,88 @@ def build_workspace_from_config(
     source_summaries: list[dict] = []
     nodes: list[dict[str, object]] = []
     edges: list[dict[str, str]] = []
+    analysis_cache = load_file_analysis_cache()
+    cache_updates: dict[str, dict] = {}
+    cache_lock = threading.Lock()
 
-    total_sources = max(len(source_specs), 1)
-    for source_index, source in enumerate(source_specs, start=1):
-        source_progress_start = 10 + int(((source_index - 1) / total_sources) * 55)
-        source_progress_end = 10 + int((source_index / total_sources) * 55)
+    if parallel_output is None:
+        parallel_output = not dry_run and worker_profile == "aggressive"
 
-        def source_progress(detail: dict) -> None:
-            if not progress_callback:
-                return
-            fraction = max(0.0, min(1.0, float(detail.get("fraction", 0.0))))
-            mapped_progress = source_progress_start + int((source_progress_end - source_progress_start) * fraction)
-            progress_callback(
-                {
-                    "progress": mapped_progress,
-                    "message": detail.get("message", f"Scanning {source['name']}"),
-                }
-            )
+    source_progress_lock = threading.Lock()
+    source_progress_fractions = [0.0] * len(source_specs)
 
-        if progress_callback:
-            progress_callback(
-                {
-                    "progress": source_progress_start,
-                    "message": f"Scanning {source['name']}",
-                }
-            )
-        records, skipped = scan_source(source, defaults, progress_callback=source_progress)
-        summary = summarize_source(
-            source,
-            records,
-            skipped,
-            default_mode=normalized.get("default_mode", "copy"),
+    def update_source_progress(source_index: int, source_name: str, detail: dict) -> None:
+        if not progress_callback:
+            return
+        fraction = max(0.0, min(1.0, float(detail.get("fraction", 0.0))))
+        with source_progress_lock:
+            source_progress_fractions[source_index] = fraction
+            aggregate_fraction = sum(source_progress_fractions) / max(len(source_progress_fractions), 1)
+        progress_callback(
+            {
+                "progress": 10 + int(aggregate_fraction * 55),
+                "message": detail.get("message", f"Scanning {source_name}"),
+            }
         )
+
+    def process_source(source_index: int, source: dict, assigned_workers: int) -> dict:
+        source_name = source["name"]
+        update_source_progress(source_index, source_name, {"fraction": 0.0, "message": f"Scanning {source_name}"})
+        records, skipped = scan_source(
+            source,
+            defaults,
+            worker_count=assigned_workers,
+            analysis_cache=analysis_cache,
+            cache_updates=cache_updates,
+            cache_lock=cache_lock,
+            progress_callback=lambda detail: update_source_progress(source_index, source_name, detail),
+        )
+        link_edges: list[dict[str, str]] = []
+        for record in records:
+            link_edges.extend(extract_edges(record, records))
+        update_source_progress(source_index, source_name, {"fraction": 1.0, "message": f"Indexed {source_name}"})
+        return {
+            "source_index": source_index,
+            "source": source,
+            "records": records,
+            "skipped": skipped,
+            "link_edges": link_edges,
+            "summary": summarize_source(
+                source,
+                records,
+                skipped,
+                default_mode=normalized.get("default_mode", "copy"),
+            ),
+        }
+
+    with reserve_worker_budget(worker_count, profile=worker_profile) as reserved_workers:
+        source_workers, per_source_workers = source_execution_plan(reserved_workers, len(source_specs))
+        source_results: list[dict] = []
+
+        if len(source_specs) == 1 or source_workers == 1:
+            assigned_workers = per_source_workers[0] if per_source_workers else reserved_workers
+            for source_index, source in enumerate(source_specs):
+                source_results.append(process_source(source_index, source, assigned_workers))
+        else:
+            with ThreadPoolExecutor(max_workers=source_workers, thread_name_prefix="context-vault-source") as executor:
+                future_map = {
+                    executor.submit(
+                        process_source,
+                        source_index,
+                        source,
+                        per_source_workers[source_index % len(per_source_workers)],
+                    ): source_index
+                    for source_index, source in enumerate(source_specs)
+                }
+                for future in as_completed(future_map):
+                    source_results.append(future.result())
+
+    for result in sorted(source_results, key=lambda item: item["source_index"]):
+        source = result["source"]
+        records = result["records"]
+        skipped = result["skipped"]
+        summary = result["summary"]
+
         source_summaries.append(summary)
         all_records.extend(records)
         all_skipped.extend(skipped)
@@ -909,10 +1046,10 @@ def build_workspace_from_config(
                     "original_path": record.original_path,
                     "extension": record.extension,
                     "size_bytes": record.size_bytes,
-                        "summary": record.summary,
-                        "label": Path(record.rel_path).name,
-                    }
-                )
+                    "summary": record.summary,
+                    "label": Path(record.rel_path).name,
+                }
+            )
             edges.append(
                 {
                     "type": "contains",
@@ -921,8 +1058,7 @@ def build_workspace_from_config(
                 }
             )
 
-        for record in records:
-            edges.extend(extract_edges(record, records))
+        edges.extend(result["link_edges"])
 
         if not dry_run:
             mode = (source.get("mode") or normalized.get("default_mode", "copy")).lower()
@@ -930,22 +1066,42 @@ def build_workspace_from_config(
                 mode = "copy"
             if mode not in {"copy", "symlink"}:
                 raise ValueError(f"Unsupported mode for {source['name']}: {mode}")
-            for record in records:
-                dest_path = vault_dir / record.mirrored_rel_path
-                copy_or_link(Path(record.original_path), dest_path, mode)
+            result["output_mode"] = mode
 
-            source_note_path = maps_dir / f"{slugify(source['name'])}.md"
-            source_note_path.write_text(
-                render_source_note(source, summary, generated_at),
-                encoding="utf-8",
+    if cache_updates:
+        next_cache = dict(analysis_cache)
+        next_cache.update(cache_updates)
+        save_file_analysis_cache(next_cache)
+
+    if not dry_run:
+        output_tasks: list[tuple[Path, Path, str]] = []
+        source_note_payloads: list[tuple[Path, str]] = []
+        for result in sorted(source_results, key=lambda item: item["source_index"]):
+            source = result["source"]
+            summary = result["summary"]
+            mode = result["output_mode"]
+            for record in result["records"]:
+                output_tasks.append((Path(record.original_path), vault_dir / record.mirrored_rel_path, mode))
+            source_note_payloads.append(
+                (
+                    maps_dir / f"{slugify(source['name'])}.md",
+                    render_source_note(source, summary, generated_at),
+                )
             )
-        if progress_callback:
-            progress_callback(
-                {
-                    "progress": 10 + int((source_index / total_sources) * 65),
-                    "message": f"Indexed {source['name']}",
-                }
-            )
+
+        if parallel_output and output_tasks:
+            with reserve_worker_budget(None, profile=worker_profile) as output_workers:
+                with ThreadPoolExecutor(
+                    max_workers=min(output_workers, len(output_tasks)),
+                    thread_name_prefix="context-vault-output",
+                ) as executor:
+                    list(executor.map(lambda item: copy_or_link(item[0], item[1], item[2]), output_tasks))
+        else:
+            for source_file, dest_file, mode in output_tasks:
+                copy_or_link(source_file, dest_file, mode)
+
+        for note_path, content in source_note_payloads:
+            note_path.write_text(content, encoding="utf-8")
 
     summary = {
         "generated_at": generated_at,

@@ -3,8 +3,152 @@ function naturalCompare(left, right) {
 }
 
 
+const TYPE_METADATA = [
+  { id: "source", label: "source", accent: "#7ce6d3" },
+  { id: "markdown-note", label: "markdown note", accent: "#9b8cff" },
+  { id: "other-file", label: "other file", accent: "#f6c177" },
+];
+
+
 export function graphNodeLabel(node) {
   return node?.name || node?.label || node?.rel_path || node?.id || "Unknown node";
+}
+
+
+export function graphNodeTypeKey(node) {
+  if (node?.type === "source") {
+    return "source";
+  }
+  if ((node?.extension || "").toLowerCase() === ".md") {
+    return "markdown-note";
+  }
+  return "other-file";
+}
+
+
+export function graphNodeFolderKey(node) {
+  if (!node?.rel_path) {
+    return null;
+  }
+
+  const parts = node.rel_path.split("/").filter(Boolean);
+  if (parts.length <= 1) {
+    return "folder:__root__";
+  }
+
+  return `folder:${parts[0].toLowerCase()}`;
+}
+
+
+export function graphNodeFolderLabel(node) {
+  if (!node?.rel_path) {
+    return null;
+  }
+
+  const parts = node.rel_path.split("/").filter(Boolean);
+  if (parts.length <= 1) {
+    return "Root files";
+  }
+
+  return parts[0];
+}
+
+
+export function buildGraphFocusOptions(graph) {
+  const typeCounts = new Map(TYPE_METADATA.map((item) => [item.id, 0]));
+  const folderCounts = new Map();
+
+  for (const node of graph?.nodes || []) {
+    const typeKey = graphNodeTypeKey(node);
+    typeCounts.set(typeKey, (typeCounts.get(typeKey) || 0) + 1);
+
+    if (node.type === "source") {
+      continue;
+    }
+
+    const folderKey = graphNodeFolderKey(node);
+    const folderLabel = graphNodeFolderLabel(node);
+    if (!folderKey || !folderLabel) {
+      continue;
+    }
+
+    const existing = folderCounts.get(folderKey) || {
+      id: folderKey,
+      label: folderLabel,
+      count: 0,
+      kind: "folder",
+      accent: "rgba(190, 196, 224, 0.88)",
+    };
+    existing.count += 1;
+    folderCounts.set(folderKey, existing);
+  }
+
+  const typeOptions = TYPE_METADATA
+    .map((item) => ({
+      ...item,
+      count: typeCounts.get(item.id) || 0,
+      kind: "type",
+    }))
+    .filter((item) => item.count > 0);
+
+  const folderOptions = [...folderCounts.values()].sort(
+    (left, right) => right.count - left.count || naturalCompare(left.label, right.label),
+  );
+
+  return { typeOptions, folderOptions };
+}
+
+
+export function filterGraphByFocus(graph, { activeChipIds = [] } = {}) {
+  const activeIds = activeChipIds instanceof Set ? activeChipIds : new Set(activeChipIds);
+  if (!activeIds.size || !graph?.nodes?.length) {
+    return graph;
+  }
+
+  const nodeLookup = new Map((graph.nodes || []).map((node) => [node.id, node]));
+  const visibleIds = new Set();
+  const visibleFileIds = new Set();
+
+  for (const node of graph.nodes || []) {
+    const typeKey = graphNodeTypeKey(node);
+    const folderKey = graphNodeFolderKey(node);
+    const matchesType = activeIds.has(typeKey);
+    const matchesFolder = folderKey ? activeIds.has(folderKey) : false;
+
+    if (node.type === "source") {
+      if (matchesType) {
+        visibleIds.add(node.id);
+      }
+      continue;
+    }
+
+    if (matchesType || matchesFolder) {
+      visibleIds.add(node.id);
+      visibleFileIds.add(node.id);
+    }
+  }
+
+  if (visibleFileIds.size > 0) {
+    for (const edge of graph.edges || []) {
+      if (visibleFileIds.has(edge.from)) {
+        const candidate = nodeLookup.get(edge.to);
+        if (candidate?.type === "source") {
+          visibleIds.add(edge.to);
+        }
+      }
+      if (visibleFileIds.has(edge.to)) {
+        const candidate = nodeLookup.get(edge.from);
+        if (candidate?.type === "source") {
+          visibleIds.add(edge.from);
+        }
+      }
+    }
+  }
+
+  return {
+    nodes: (graph.nodes || []).filter((node) => visibleIds.has(node.id)),
+    edges: (graph.edges || []).filter((edge) => visibleIds.has(edge.from) && visibleIds.has(edge.to)),
+  };
 }
 
 

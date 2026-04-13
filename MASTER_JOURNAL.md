@@ -228,6 +228,27 @@ Turn the earlier Obsidian-style mapping prototype into a real shareable app with
 - lazy-loaded the WebGL graph tab so the rest of the app still opens on a lighter main bundle
 - updated operator-facing docs to describe the WebGL graph behavior and verification surface
 
+## Phase 24
+
+- added the first real Digital Brain roadmap as `DIGITAL_BRAIN_PHASES.md`
+- started DB1 by giving Digital Brain its own subtab language:
+  - Setup
+  - Focus
+  - Memory
+  - Timeline
+  - Decisions
+  - Saved Graphs
+  - Advanced
+- kept the current graph and note substrate underneath so the lane is usable immediately
+- added persisted Digital Brain setup settings for:
+  - scan mode
+  - graph density
+  - enrichment mode
+  - recent-file priority
+  - notes/chat inclusion flags
+  - cognitive priority categories
+- added an initial Decisions view with first-pass heuristic candidates so the lane has a usable destination before deeper extraction work lands
+
 ## Verification
 
 - `python3 -m py_compile` for the shared builder

@@ -2,7 +2,13 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 import ForceGraph3D from "react-force-graph-3d";
 
-import { graphNodeLabel, searchGraphNodes, selectVisibleGraph } from "./lib/graph";
+import {
+  buildGraphFocusOptions,
+  filterGraphByFocus,
+  graphNodeLabel,
+  searchGraphNodes,
+  selectVisibleGraph,
+} from "./lib/graph";
 import { localGraph } from "./lib/vault";
 
 
@@ -87,6 +93,7 @@ export default function GraphMap({ graph, onSelectNode }) {
   const [selectedNodeId, setSelectedNodeId] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [graphSize, setGraphSize] = useState(DEFAULT_GRAPH_SIZE);
+  const [activeFocusChipIds, setActiveFocusChipIds] = useState(() => new Set());
 
   const filteredGraph = useMemo(() => {
     if (!deferredGraph?.nodes?.length) {
@@ -98,9 +105,35 @@ export default function GraphMap({ graph, onSelectNode }) {
     return localGraph(deferredGraph, selectedNodeId, localDepth);
   }, [deferredGraph, localDepth, selectedNodeId]);
 
+  const sourceScopedGraph = useMemo(() => {
+    if (!filteredGraph?.nodes?.length || sourceFilter === "all") {
+      return filteredGraph;
+    }
+
+    const nodes = filteredGraph.nodes.filter((node) => {
+      if (node.type === "source") {
+        return node.name === sourceFilter;
+      }
+      return node.source === sourceFilter;
+    });
+    const visibleIds = new Set(nodes.map((node) => node.id));
+
+    return {
+      nodes,
+      edges: (filteredGraph.edges || []).filter((edge) => visibleIds.has(edge.from) && visibleIds.has(edge.to)),
+    };
+  }, [filteredGraph, sourceFilter]);
+
+  const focusOptions = useMemo(() => buildGraphFocusOptions(sourceScopedGraph), [sourceScopedGraph]);
+
+  const focusedGraph = useMemo(
+    () => filterGraphByFocus(sourceScopedGraph, { activeChipIds: activeFocusChipIds }),
+    [activeFocusChipIds, sourceScopedGraph],
+  );
+
   const visibleGraph = useMemo(
-    () => selectVisibleGraph(filteredGraph, { sourceFilter, maxNodes, selectedNodeId }),
-    [filteredGraph, maxNodes, selectedNodeId, sourceFilter],
+    () => selectVisibleGraph(focusedGraph, { sourceFilter: "all", maxNodes, selectedNodeId }),
+    [focusedGraph, maxNodes, selectedNodeId],
   );
 
   const sourceOptions = (deferredGraph?.nodes || [])
@@ -108,9 +141,11 @@ export default function GraphMap({ graph, onSelectNode }) {
     .map((node) => node.name)
     .sort((a, b) => a.localeCompare(b));
 
-  const searchResults = useMemo(() => searchGraphNodes(deferredGraph, searchQuery, 6), [deferredGraph, searchQuery]);
+  const searchResults = useMemo(() => searchGraphNodes(sourceScopedGraph, searchQuery, 6), [searchQuery, sourceScopedGraph]);
 
   const selectedNode = visibleGraph.nodes.find((node) => node.id === selectedNodeId) || null;
+  const focusChipCount = focusOptions.typeOptions.length + focusOptions.folderOptions.length;
+  const focusedNodeCount = focusedGraph?.nodes?.length || 0;
 
   const highlightNodeIds = useMemo(() => {
     if (!selectedNodeId) {
@@ -143,6 +178,20 @@ export default function GraphMap({ graph, onSelectNode }) {
   const hiddenNodeCount = Math.max(visibleGraph.totalNodes - visibleGraph.nodes.length, 0);
   const nodeCapMax = Math.max(40, visibleGraph.totalNodes || 40);
   const nodeCapStep = nodeCapMax > 3000 ? 100 : nodeCapMax > 1200 ? 50 : 10;
+
+  useEffect(() => {
+    const availableChipIds = new Set([
+      ...focusOptions.typeOptions.map((item) => item.id),
+      ...focusOptions.folderOptions.map((item) => item.id),
+    ]);
+    setActiveFocusChipIds((current) => {
+      if (!current.size) {
+        return current;
+      }
+      const next = new Set([...current].filter((id) => availableChipIds.has(id)));
+      return next.size === current.size ? current : next;
+    });
+  }, [focusOptions.folderOptions, focusOptions.typeOptions]);
 
   useEffect(() => {
     if (!visibleGraph.nodes.length) {
@@ -233,9 +282,22 @@ export default function GraphMap({ graph, onSelectNode }) {
   function handleSearchSelect(node) {
     setSelectedNodeId(node.id);
     setSourceFilter(node.type === "source" ? node.name : node.source || "all");
+    setActiveFocusChipIds(new Set());
     setSearchQuery(graphNodeLabel(node));
     setMaxNodes((current) => Math.max(current, Math.min(DEFAULT_NODE_CAP, nodeCapMax)));
     onSelectNode?.(node);
+  }
+
+  function toggleFocusChip(chipId) {
+    setActiveFocusChipIds((current) => {
+      const next = new Set(current);
+      if (next.has(chipId)) {
+        next.delete(chipId);
+      } else {
+        next.add(chipId);
+      }
+      return next;
+    });
   }
 
   if (!deferredGraph?.nodes?.length) {
@@ -274,6 +336,11 @@ export default function GraphMap({ graph, onSelectNode }) {
           <div className="microcopy">
             Rendering {visibleGraph.nodes.length} of {visibleGraph.totalNodes} nodes
           </div>
+          {activeFocusChipIds.size > 0 ? (
+              <div className="microcopy">
+              Focus categories keep {focusedNodeCount} of {sourceScopedGraph?.nodes?.length || 0} indexed nodes visible before the render cap.
+            </div>
+          ) : null}
           {hiddenNodeCount > 0 ? (
             <>
               <div className="microcopy">The remaining {hiddenNodeCount} stay indexed and searchable.</div>
@@ -330,13 +397,65 @@ export default function GraphMap({ graph, onSelectNode }) {
       </div>
 
       <div className="graph-toolbar graph-toolbar--secondary">
-        <div className="graph-legend">
-          <span><i className="legend-dot legend-dot--source" /> source</span>
-          <span><i className="legend-dot legend-dot--note" /> markdown note</span>
-          <span><i className="legend-dot legend-dot--file" /> other file</span>
+        <div className="graph-focus-panel">
+          <div className="graph-focus-panel__header">
+            <div>
+              <span className="eyebrow">Focus categories</span>
+              <div className="microcopy">Click one or more categories to keep those nodes visible and hide the rest.</div>
+            </div>
+            {activeFocusChipIds.size > 0 ? (
+              <button className="ghost-button" type="button" onClick={() => setActiveFocusChipIds(new Set())}>
+                Clear
+              </button>
+            ) : null}
+          </div>
+          {focusChipCount ? (
+            <>
+              <div className="graph-focus-group">
+                <span className="graph-focus-group__title">Node types</span>
+                <div className="graph-focus-chip-row">
+                  {focusOptions.typeOptions.map((item) => (
+                    <button
+                      key={item.id}
+                      className={`graph-focus-chip ${activeFocusChipIds.has(item.id) ? "graph-focus-chip--active" : ""}`}
+                      type="button"
+                      onClick={() => toggleFocusChip(item.id)}
+                      style={{ "--graph-chip-accent": item.accent }}
+                    >
+                      <i className="legend-dot" />
+                      <strong>{item.label}</strong>
+                      <span>{item.count}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {focusOptions.folderOptions.length ? (
+                <div className="graph-focus-group">
+                  <span className="graph-focus-group__title">Top folders</span>
+                  <div className="graph-focus-chip-row graph-focus-chip-row--scroll">
+                    {focusOptions.folderOptions.map((item) => (
+                      <button
+                        key={item.id}
+                        className={`graph-focus-chip ${activeFocusChipIds.has(item.id) ? "graph-focus-chip--active" : ""}`}
+                        type="button"
+                        onClick={() => toggleFocusChip(item.id)}
+                        style={{ "--graph-chip-accent": item.accent }}
+                      >
+                        <i className="legend-dot" />
+                        <strong>{item.label}</strong>
+                        <span>{item.count}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <p className="graph-search-empty">No category chips are available for the current graph scope yet.</p>
+          )}
         </div>
         <div className="graph-hint">
-          True WebGL view: left-drag to orbit, right-drag to pan, wheel to zoom. Drag a node to pin it in place, and right-click a pinned node to release it.
+          True WebGL view: left-drag to orbit, right-drag to pan, wheel to zoom. Drag a node to pin it in place, right-click a pinned node to release it, and use the focus chips to isolate node types or folders.
         </div>
       </div>
 

@@ -7,6 +7,7 @@ import re
 import uuid
 
 from context_vault_studio.services.workspace_builder import build_workspace_from_config, read_text_safe
+from context_vault_studio.services.worker_policy import reserve_worker_budget
 from context_vault_studio.storage import REPO_ROOT, save_logic_profile
 
 
@@ -37,13 +38,14 @@ def _analyze_file(file_entry: dict) -> dict:
     }
 
 
-def build_logic_profile(config: dict, *, max_workers: int = 4) -> dict:
+def build_logic_profile(config: dict, *, max_workers: int = 8) -> dict:
     started = perf_counter()
     result = build_workspace_from_config(config, base_dir=Path(REPO_ROOT), dry_run=True, clean=True)
     files = result.get("files", [])
 
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        analyses = list(executor.map(_analyze_file, files))
+    with reserve_worker_budget(max_workers) as worker_count:
+        with ProcessPoolExecutor(max_workers=worker_count) as executor:
+            analyses = list(executor.map(_analyze_file, files))
 
     import_count = sum(len(item["imports"]) for item in analyses)
     symbol_count = sum(len(item["symbols"]) for item in analyses)
@@ -62,7 +64,7 @@ def build_logic_profile(config: dict, *, max_workers: int = 4) -> dict:
             "symbol_count": symbol_count,
             "route_count": route_count,
             "storage_touch_count": storage_touch_count,
-            "worker_count": max_workers,
+            "worker_count": worker_count,
             "elapsed_seconds": round(perf_counter() - started, 4),
         },
         "feature_clusters": [

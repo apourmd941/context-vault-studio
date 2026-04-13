@@ -36,6 +36,7 @@ import PreviewPane from "./PreviewPane";
 import QuickSwitcher from "./QuickSwitcher";
 import SnapshotPanel from "./SnapshotPanel";
 import { buildAdjacency, buildFileTree, searchFiles } from "./lib/vault";
+import { DEFAULT_WORKER_COUNT, workerCountForProfile, workerProfileForLane } from "./lib/workerPolicy";
 
 
 const GraphMap = lazy(() => import("./GraphMap"));
@@ -58,23 +59,66 @@ const EMPTY_SOURCE = {
   max_file_size_bytes: "",
 };
 
+const EMPTY_DIGITAL_BRAIN = {
+  scan_mode: "quick_start",
+  graph_density: "balanced",
+  enrichment_mode: "background",
+  prioritize_recent_files: true,
+  include_notes: true,
+  include_chats: true,
+  priority_categories: ["conversations", "documents", "memories", "decisions", "topics"],
+};
+
+const EXPLORE_SUB_TABS = [
+  { id: "setup", label: "Setup" },
+  { id: "graph", label: "Graph" },
+  { id: "notes", label: "Notes" },
+  { id: "canvas", label: "Canvas" },
+  { id: "history", label: "History" },
+  { id: "saved", label: "Saved Graphs" },
+  { id: "advanced", label: "Advanced" },
+];
+
+const DIGITAL_BRAIN_SUB_TABS = [
+  { id: "setup", label: "Setup" },
+  { id: "focus", label: "Focus" },
+  { id: "memory", label: "Memory" },
+  { id: "timeline", label: "Timeline" },
+  { id: "decisions", label: "Decisions" },
+  { id: "saved", label: "Saved Graphs" },
+  { id: "advanced", label: "Advanced" },
+];
+
+const DIGITAL_BRAIN_VIEW_MAP = {
+  setup: "setup",
+  focus: "graph",
+  memory: "notes",
+  timeline: "history",
+  decisions: "decisions",
+  saved: "saved",
+  advanced: "advanced",
+};
+
+const DIGITAL_BRAIN_CATEGORY_OPTIONS = [
+  { id: "conversations", label: "Conversations" },
+  { id: "documents", label: "Documents" },
+  { id: "memories", label: "Memories" },
+  { id: "decisions", label: "Decisions" },
+  { id: "topics", label: "Topics" },
+  { id: "people", label: "People" },
+  { id: "tasks", label: "Tasks" },
+];
+
 const MAIN_TABS = [
   { id: "structure", label: "Structure" },
   { id: "logic", label: "Logic" },
   { id: "explain", label: "Explain" },
   { id: "build", label: "Build" },
+  { id: "digital-brain", label: "Digital brain" },
 ];
 
 const SUB_TABS = {
-  structure: [
-    { id: "setup", label: "Setup" },
-    { id: "graph", label: "Graph" },
-    { id: "notes", label: "Notes" },
-    { id: "canvas", label: "Canvas" },
-    { id: "history", label: "History" },
-    { id: "saved", label: "Saved Graphs" },
-    { id: "advanced", label: "Advanced" },
-  ],
+  structure: EXPLORE_SUB_TABS,
   logic: [
     { id: "overview", label: "Overview" },
     { id: "signals", label: "Signals" },
@@ -91,6 +135,7 @@ const SUB_TABS = {
     { id: "apply", label: "Apply" },
     { id: "history", label: "History" },
   ],
+  "digital-brain": DIGITAL_BRAIN_SUB_TABS,
 };
 
 const LANE_COPY = {
@@ -99,6 +144,12 @@ const LANE_COPY = {
     title: "Map the files and folders you want the app to understand.",
     description:
       "Use Structure to choose allowed folders or disks, preview the graph, inspect notes, and review how the scoped workspace changes over time.",
+  },
+  "digital-brain": {
+    eyebrow: "Digital brain",
+    title: "Grow the same curated workspace into a reusable digital brain.",
+    description:
+      "Digital brain starts with the same mapping, graph, notes, canvas, and history tools as Structure so you can evolve the scoped workspace in a dedicated lane.",
   },
   logic: {
     eyebrow: "Code mapper",
@@ -161,7 +212,31 @@ function syncAccessWithFolders(config) {
       blocked_paths: [...(config.access?.blocked_paths ?? EMPTY_ACCESS.blocked_paths)],
       blocked_patterns: [...(config.access?.blocked_patterns ?? EMPTY_ACCESS.blocked_patterns)],
     },
+    digital_brain: {
+      ...EMPTY_DIGITAL_BRAIN,
+      ...(config.digital_brain ?? {}),
+      priority_categories: [...(config.digital_brain?.priority_categories ?? EMPTY_DIGITAL_BRAIN.priority_categories)],
+    },
   };
+}
+
+
+function exploreViewForLaneTab(lane, tab) {
+  if (lane !== "digital-brain") {
+    return tab;
+  }
+  return DIGITAL_BRAIN_VIEW_MAP[tab] || "setup";
+}
+
+
+function exploreTabIdForView(lane, view) {
+  if (lane !== "digital-brain") {
+    return view;
+  }
+  return (
+    Object.entries(DIGITAL_BRAIN_VIEW_MAP).find(([, targetView]) => targetView === view)?.[0] ||
+    "setup"
+  );
 }
 
 
@@ -174,6 +249,7 @@ function createEmptyConfig() {
     default_exclude: [],
     default_include: [],
     access: { ...EMPTY_ACCESS },
+    digital_brain: { ...EMPTY_DIGITAL_BRAIN },
     sources: [],
   };
 }
@@ -190,6 +266,11 @@ function normalizeConfig(config = {}) {
       allowed_roots: [...(config.access?.allowed_roots ?? EMPTY_ACCESS.allowed_roots)],
       blocked_paths: [...(config.access?.blocked_paths ?? EMPTY_ACCESS.blocked_paths)],
       blocked_patterns: [...(config.access?.blocked_patterns ?? EMPTY_ACCESS.blocked_patterns)],
+    },
+    digital_brain: {
+      ...EMPTY_DIGITAL_BRAIN,
+      ...(config.digital_brain ?? {}),
+      priority_categories: [...(config.digital_brain?.priority_categories ?? EMPTY_DIGITAL_BRAIN.priority_categories)],
     },
     sources: (config.sources ?? []).map(normalizeSource),
   });
@@ -208,6 +289,11 @@ function serializeConfig(config) {
       blocked_paths: [...(syncedConfig.access?.blocked_paths ?? [])],
       blocked_patterns: [...(syncedConfig.access?.blocked_patterns ?? [])],
       enforce_copy_mode: Boolean(syncedConfig.access?.enforce_copy_mode),
+    },
+    digital_brain: {
+      ...EMPTY_DIGITAL_BRAIN,
+      ...(syncedConfig.digital_brain ?? {}),
+      priority_categories: [...(syncedConfig.digital_brain?.priority_categories ?? [])],
     },
     sources: syncedConfig.sources.map((source) => ({
       ...source,
@@ -708,6 +794,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("vault");
   const [mainTab, setMainTab] = useState("structure");
   const [structureTab, setStructureTab] = useState("setup");
+  const [digitalBrainTab, setDigitalBrainTab] = useState("setup");
   const [logicTab, setLogicTab] = useState("overview");
   const [explainTab, setExplainTab] = useState("overview");
   const [buildTab, setBuildTab] = useState("goal");
@@ -728,10 +815,12 @@ export default function App() {
   const [historyComparison, setHistoryComparison] = useState(null);
   const [buildGoalDraft, setBuildGoalDraft] = useState("Generate a deterministic scoped improvement plan");
   const [buildPiecesDraft, setBuildPiecesDraft] = useState("docs_cleanup_piece");
+  const [logicWorkerProfile, setLogicWorkerProfile] = useState("default");
   const [canvases, setCanvases] = useState([]);
   const [selectedCanvasId, setSelectedCanvasId] = useState("");
   const [jobs, setJobs] = useState([]);
   const [activeJobId, setActiveJobId] = useState("");
+  const [jobExploreLane, setJobExploreLane] = useState("structure");
   const [layout, setLayout] = useState({
     active_tab: "vault",
     selected_file_path: null,
@@ -768,8 +857,19 @@ export default function App() {
   const hasSources = deferredSources.length > 0;
   const hasFiles = files.length > 0;
   const recentFiles = files.slice(0, 6);
+  const isExploreLane = mainTab === "structure" || mainTab === "digital-brain";
+  const activeExploreLane = mainTab === "digital-brain" ? "digital-brain" : "structure";
+  const activeExploreTab = mainTab === "digital-brain" ? digitalBrainTab : structureTab;
+  const activeExploreView = exploreViewForLaneTab(activeExploreLane, activeExploreTab);
+  const preferredExploreLane = isExploreLane ? activeExploreLane : "structure";
   const blockedRuleCount =
     (config.access?.blocked_paths?.length ?? 0) + (config.access?.blocked_patterns?.length ?? 0);
+  const decisionCandidates = useMemo(() => {
+    const keywordRe = /\b(decision|decide|plan|summary|proposal|roadmap|next steps|conclusion)\b/i;
+    return files
+      .filter((file) => keywordRe.test(`${file.label || ""} ${file.summary || ""} ${file.rel_path || ""}`))
+      .slice(0, 12);
+  }, [files]);
 
   async function refreshV2Artifacts() {
     const [bootstrapPayload, timeline] = await Promise.all([fetchBootstrap(), fetchHistoryTimeline()]);
@@ -786,18 +886,30 @@ export default function App() {
     return bootstrapPayload;
   }
 
-  function openStructureTab(tab) {
-    setMainTab("structure");
-    setStructureTab(tab);
-    if (tab === "notes") {
+  function syncActiveSurface(view) {
+    if (view === "notes") {
       setActiveTab("notes");
-    } else if (tab === "canvas") {
+    } else if (view === "canvas") {
       setActiveTab("canvas");
-    } else if (tab === "graph") {
+    } else if (view === "graph") {
       setActiveTab("graph");
     } else {
       setActiveTab("vault");
     }
+  }
+
+  function openExploreTab(lane, tab) {
+    setMainTab(lane);
+    if (lane === "digital-brain") {
+      setDigitalBrainTab(tab);
+    } else {
+      setStructureTab(tab);
+    }
+    syncActiveSurface(exploreViewForLaneTab(lane, tab));
+  }
+
+  function openStructureTab(tab) {
+    openExploreTab("structure", tab);
   }
 
   const outgoingLinks = useMemo(() => {
@@ -845,6 +957,7 @@ export default function App() {
           setPreview(normalizeResult(payload.last_result));
           setMainTab("structure");
           setStructureTab("setup");
+          setDigitalBrainTab("setup");
           setLogicTab("overview");
           setExplainTab("overview");
           setBuildTab("goal");
@@ -932,7 +1045,7 @@ export default function App() {
                 ? `Preview ready. ${result.summary.file_count} files are now visible in the workspace.`
                 : "Preview finished, but nothing matched yet. Adjust sources or patterns.",
             );
-            openStructureTab(result.summary?.file_count ? "graph" : "setup");
+            openExploreTab(jobExploreLane, result.summary?.file_count ? exploreTabIdForView(jobExploreLane, "graph") : "setup");
           } else {
             setBuildResult(result);
             setPreview(result);
@@ -948,7 +1061,7 @@ export default function App() {
                 result.artifacts?.vault_dir || result.artifacts?.output_dir
               }.`,
             );
-            openStructureTab(result.summary?.file_count ? "notes" : "setup");
+            openExploreTab(jobExploreLane, result.summary?.file_count ? exploreTabIdForView(jobExploreLane, "notes") : "setup");
           }
           setBusy("");
           setActiveJobId("");
@@ -956,7 +1069,7 @@ export default function App() {
           setError(job.error || "Job failed");
           setBusy("");
           setActiveJobId("");
-          openStructureTab("setup");
+          openExploreTab(jobExploreLane, "setup");
         }
       } catch (pollError) {
         setError(pollError.message);
@@ -966,7 +1079,7 @@ export default function App() {
     }, 900);
 
     return () => window.clearInterval(interval);
-  }, [activeJobId]);
+  }, [activeJobId, jobExploreLane]);
 
   useEffect(() => {
     function onKeyDown(event) {
@@ -1013,6 +1126,26 @@ export default function App() {
         [field]: value,
       },
     });
+  }
+
+  function updateDigitalBrainField(field, value) {
+    patchConfig({
+      ...config,
+      digital_brain: {
+        ...config.digital_brain,
+        [field]: value,
+      },
+    });
+  }
+
+  function toggleDigitalBrainCategory(categoryId) {
+    const current = new Set(config.digital_brain.priority_categories ?? []);
+    if (current.has(categoryId)) {
+      current.delete(categoryId);
+    } else {
+      current.add(categoryId);
+    }
+    updateDigitalBrainField("priority_categories", [...current]);
   }
 
   function updateSource(index, field, value) {
@@ -1170,7 +1303,7 @@ export default function App() {
     const validationError = validateWorkspaceRun(payload);
     if (validationError) {
       setError(validationError);
-      openStructureTab("setup");
+      openExploreTab(preferredExploreLane, "setup");
       return;
     }
 
@@ -1178,7 +1311,8 @@ export default function App() {
     setError("");
     setNotice("");
     try {
-      const job = await createJob(kind, payload, true);
+      setJobExploreLane(preferredExploreLane);
+      const job = await createJob(kind, payload, true, workerProfileForLane(preferredExploreLane));
       setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)].slice(0, 12));
       setActiveJobId(job.id);
     } catch (jobError) {
@@ -1190,7 +1324,7 @@ export default function App() {
   async function handleLoadExample(example, autoPreview = false) {
     const nextConfig = normalizeConfig(example.config);
     patchConfig(nextConfig);
-    openStructureTab("setup");
+    openExploreTab(preferredExploreLane, "setup");
     if (autoPreview && nextConfig.sources.length) {
       await startWorkspaceJob("preview", nextConfig);
     } else {
@@ -1201,7 +1335,7 @@ export default function App() {
   function loadPreset(preset) {
     patchConfig(normalizeConfig(preset.config));
     setNotice(`${preset.name} loaded.`);
-    openStructureTab("setup");
+    openExploreTab(preferredExploreLane, "setup");
   }
 
   async function handleSavePreset() {
@@ -1261,7 +1395,7 @@ export default function App() {
     setError("");
     setNotice("");
     try {
-      const payload = await createLogicProfile(serializeConfig(config), 4);
+      const payload = await createLogicProfile(serializeConfig(config), logicWorkerCount);
       await refreshV2Artifacts();
       setNotice(`Logic profile ready for ${payload.profile.summary.file_count} files.`);
     } catch (logicError) {
@@ -1388,7 +1522,7 @@ export default function App() {
     setError("");
     setNotice("");
     try {
-      const payload = await createParallelScanProfile(serializeConfig(config), 4);
+      const payload = await createParallelScanProfile(serializeConfig(config), logicWorkerCount);
       await refreshV2Artifacts();
       setNotice(`Parallel scan profile captured for ${payload.profile.summary.file_count} files.`);
     } catch (parallelError) {
@@ -1457,7 +1591,7 @@ export default function App() {
     const firstAllowedRoot = config.access.allowed_roots[0];
     if (!firstAllowedRoot) {
       setError("Add an allowed root first so the app knows where a new note is permitted to be created.");
-      openStructureTab("setup");
+      openExploreTab(preferredExploreLane, "setup");
       return;
     }
 
@@ -1504,7 +1638,7 @@ export default function App() {
       });
       setCanvases((current) => [...current, canvas]);
       setSelectedCanvasId(canvas.id);
-      openStructureTab("canvas");
+      openExploreTab(preferredExploreLane, "canvas");
     } catch (canvasError) {
       setError(canvasError.message);
     }
@@ -1578,7 +1712,7 @@ export default function App() {
   function selectFile(file) {
     setSelectedFile(file);
     setQuickOpen(false);
-    openStructureTab("notes");
+    openExploreTab(preferredExploreLane, exploreTabIdForView(preferredExploreLane, "notes"));
   }
 
   function selectBookmark(bookmark) {
@@ -1598,9 +1732,10 @@ export default function App() {
   const latestApplyRun = buildApplyRuns[0] || null;
   const latestParallelProfile = parallelScanProfiles[0] || null;
   const latestDeltaSnapshot = deltaSnapshots[0] || null;
+  const logicWorkerCount = workerCountForProfile(logicWorkerProfile);
   const activeSubTab =
-    mainTab === "structure"
-      ? structureTab
+    isExploreLane
+      ? activeExploreTab
       : mainTab === "logic"
         ? logicTab
         : mainTab === "explain"
@@ -1608,12 +1743,20 @@ export default function App() {
           : buildTab;
 
   function handleMainTabChange(tabId) {
+    if (tabId === "structure") {
+      openExploreTab("structure", structureTab);
+      return;
+    }
+    if (tabId === "digital-brain") {
+      openExploreTab("digital-brain", digitalBrainTab);
+      return;
+    }
     setMainTab(tabId);
   }
 
   function handleSubTabChange(tabId) {
-    if (mainTab === "structure") {
-      openStructureTab(tabId);
+    if (isExploreLane) {
+      openExploreTab(activeExploreLane, tabId);
       return;
     }
     if (mainTab === "logic") {
@@ -1644,10 +1787,10 @@ export default function App() {
   const logicActions = (
     <>
       <button className="secondary-button" type="button" onClick={handleRunParallelProfile} disabled={!!busy}>
-        Parallel scan
+        Parallel scan ({logicWorkerCount})
       </button>
       <button className="primary-button" type="button" onClick={handleRunLogicProfile} disabled={!!busy}>
-        Run logic
+        Run logic ({logicWorkerCount})
       </button>
     </>
   );
@@ -1689,14 +1832,14 @@ export default function App() {
         <div className="sidebar__brand">
           <div className="brand-mark">CV</div>
           <div>
-            <span className="eyebrow">Structure / Logic / Explain / Build</span>
+            <span className="eyebrow">Structure / Logic / Explain / Build / Digital brain</span>
             <h1>Context Vault Studio</h1>
           </div>
         </div>
 
-        {mainTab === "structure" ? (
+        {isExploreLane ? (
           <>
-            {structureTab === "setup" ? (
+            {activeExploreView === "setup" ? (
               <div className="sidebar__panel">
                 <div className="panel__header">
                   <div>
@@ -1719,19 +1862,21 @@ export default function App() {
                 </div>
               </div>
             ) : null}
-            {structureTab === "notes" ? (
+            {activeExploreView === "notes" ? (
               <>
                 <div className="sidebar__panel">
-                  <span className="eyebrow">Notes</span>
+                  <span className="eyebrow">{activeExploreLane === "digital-brain" ? "Memory" : "Notes"}</span>
                   <p className="sidebar-copy">
-                    Browse matched files, follow links, and edit the scoped notes that made it into the current workspace.
+                    {activeExploreLane === "digital-brain"
+                      ? "Browse the approved files and notes currently acting as first-pass memory candidates."
+                      : "Browse matched files, follow links, and edit the scoped notes that made it into the current workspace."}
                   </p>
                 </div>
                 <BookmarkPanel bookmarks={bookmarks} onSelectBookmark={selectBookmark} />
                 <SnapshotPanel snapshots={snapshots} onRestore={handleRestoreSnapshot} />
               </>
             ) : null}
-            {structureTab === "canvas" ? (
+            {activeExploreView === "canvas" ? (
               <>
                 <div className="sidebar__panel">
                   <span className="eyebrow">Canvas tips</span>
@@ -1744,29 +1889,29 @@ export default function App() {
                 <BookmarkPanel bookmarks={bookmarks} onSelectBookmark={selectBookmark} />
               </>
             ) : null}
-            {structureTab === "graph" ? (
+            {activeExploreView === "graph" ? (
               <>
                 <div className="sidebar__panel">
-                  <span className="eyebrow">Graph tips</span>
+                  <span className="eyebrow">{activeExploreLane === "digital-brain" ? "Focus tips" : "Graph tips"}</span>
                   <ul className="sidebar-list">
                     <li>Preview or build first so the graph has real nodes.</li>
-                    <li>Use the graph to choose what to open next.</li>
+                    <li>{activeExploreLane === "digital-brain" ? "Use Focus to center what matters most right now." : "Use the graph to choose what to open next."}</li>
                     <li>Click a node to jump directly into notes.</li>
                   </ul>
                 </div>
                 <div className="sidebar__panel">
-                  <span className="eyebrow">Current map</span>
+                  <span className="eyebrow">{activeExploreLane === "digital-brain" ? "Current focus" : "Current map"}</span>
                   <div className="sidebar-card-stack">
                     <div className="sidebar-card sidebar-card--static">
                       <strong>{activeResult?.summary?.file_count ?? 0} files</strong>
                       <span>{activeResult?.summary?.edge_count ?? 0} edges</span>
-                      <em>{activeResult ? "Ready to explore" : "No result yet"}</em>
+                      <em>{activeResult ? (activeExploreLane === "digital-brain" ? "Ready to interpret" : "Ready to explore") : "No result yet"}</em>
                     </div>
                   </div>
                 </div>
               </>
             ) : null}
-            {structureTab === "history" || structureTab === "saved" || structureTab === "advanced" ? (
+            {activeExploreView === "history" || activeExploreView === "saved" || activeExploreView === "advanced" || activeExploreView === "decisions" ? (
               <div className="sidebar__panel">
                 <span className="eyebrow">Artifact summary</span>
                 <p className="sidebar-copy">
@@ -1785,6 +1930,18 @@ export default function App() {
         {mainTab === "logic" ? (
           <div className="sidebar__panel">
             <span className="eyebrow">Latest logic profile</span>
+            <div className="field-grid">
+              <label className="field-grid__wide">
+                <span>Worker mode</span>
+                <select value={logicWorkerProfile} onChange={(event) => setLogicWorkerProfile(event.target.value)}>
+                  <option value="default">Default ({DEFAULT_WORKER_COUNT} workers)</option>
+                  <option value="aggressive">Aggressive ({workerCountForProfile("aggressive")} workers)</option>
+                </select>
+              </label>
+            </div>
+            <p className="microcopy">
+              Logic and Parallel scan both use this mode. Default keeps more headroom; aggressive spends more of the shared worker budget.
+            </p>
             <div className="sidebar-card-stack">
               <div className="sidebar-card sidebar-card--static">
                 <strong>{latestLogicProfile?.label || "No logic profile yet"}</strong>
@@ -1867,9 +2024,9 @@ export default function App() {
           <div className="callout callout--error">Last job failed: {latestJob.error || latestJob.message}</div>
         ) : null}
 
-        {mainTab === "structure" && structureTab === "setup" ? (
+        {isExploreLane && activeExploreView === "setup" ? (
           <>
-            <LaneHeader lane="structure" actions={structureActions} />
+            <LaneHeader lane={activeExploreLane} actions={structureActions} />
             <section className="structure-setup-grid">
               <div className="structure-setup-main">
                 {activeResult ? (
@@ -1877,8 +2034,8 @@ export default function App() {
                     result={activeResult}
                     outputDir={buildResult?.artifacts?.vault_dir}
                     snapshotBundle={activeResult?.snapshot_bundle || snapshotBundles[0]}
-                    onOpenNotes={() => openStructureTab("notes")}
-                    onOpenGraph={() => openStructureTab("graph")}
+                    onOpenNotes={() => openExploreTab(activeExploreLane, exploreTabIdForView(activeExploreLane, "notes"))}
+                    onOpenGraph={() => openExploreTab(activeExploreLane, exploreTabIdForView(activeExploreLane, "graph"))}
                   />
                 ) : (
                   <section className="panel panel--spotlight">
@@ -1889,7 +2046,9 @@ export default function App() {
                       </div>
                     </div>
                     <p className="empty-copy">
-                      Load the guided demo from Templates or add a folder or disk, then use the top-right `Preview` button to populate Structure.
+                      {activeExploreLane === "digital-brain"
+                        ? "Load the guided demo from Templates or add approved folders, then use `Preview` to build the first selective cognitive graph."
+                        : "Load the guided demo from Templates or add a folder or disk, then use the top-right `Preview` button to populate Structure."}
                     </p>
                   </section>
                 )}
@@ -1897,13 +2056,17 @@ export default function App() {
                   <div className="panel__header panel__header--spread">
                     <div>
                       <span className="eyebrow">Setup</span>
-                      <h3>Choose the folders Structure is allowed to map</h3>
+                      <h3>
+                        {activeExploreLane === "digital-brain"
+                          ? "Choose the approved sources Digital Brain should prioritize"
+                          : "Choose the folders Structure is allowed to map"}
+                      </h3>
                     </div>
                     <div className="hero__actions hero__actions--tight">
                       <button className="primary-button" type="button" onClick={handleAddFolderByBrowse}>
                         Add folder
                       </button>
-                      <button className="ghost-button" type="button" onClick={() => openStructureTab("advanced")}>
+                      <button className="ghost-button" type="button" onClick={() => openExploreTab(activeExploreLane, exploreTabIdForView(activeExploreLane, "advanced"))}>
                         Advanced
                       </button>
                     </div>
@@ -1943,6 +2106,93 @@ export default function App() {
               </div>
 
               <div className="structure-setup-side">
+                {activeExploreLane === "digital-brain" ? (
+                  <section className="panel">
+                    <div className="panel__header">
+                      <div>
+                        <span className="eyebrow">Digital brain setup</span>
+                        <h3>Choose how the cognitive layer should index this workspace</h3>
+                      </div>
+                    </div>
+                    <div className="field-grid">
+                      <label>
+                        <span>Scan mode</span>
+                        <select
+                          value={config.digital_brain.scan_mode}
+                          onChange={(event) => updateDigitalBrainField("scan_mode", event.target.value)}
+                        >
+                          <option value="quick_start">Quick Start</option>
+                          <option value="project_priority">Project Priority</option>
+                          <option value="broad_cognitive_index">Broad Cognitive Index</option>
+                        </select>
+                      </label>
+                      <label>
+                        <span>Graph density</span>
+                        <select
+                          value={config.digital_brain.graph_density}
+                          onChange={(event) => updateDigitalBrainField("graph_density", event.target.value)}
+                        >
+                          <option value="concise">Concise</option>
+                          <option value="balanced">Balanced</option>
+                          <option value="rich">Rich</option>
+                        </select>
+                      </label>
+                      <label className="field-grid__wide">
+                        <span>Enrichment mode</span>
+                        <select
+                          value={config.digital_brain.enrichment_mode}
+                          onChange={(event) => updateDigitalBrainField("enrichment_mode", event.target.value)}
+                        >
+                          <option value="background">Background deep pass</option>
+                          <option value="on_demand">On-demand only</option>
+                          <option value="surface_only">Surface pass only</option>
+                        </select>
+                      </label>
+                    </div>
+                    <div className="graph-focus-group">
+                      <span className="field-label">Priority categories</span>
+                      <div className="graph-focus-chip-row">
+                        {DIGITAL_BRAIN_CATEGORY_OPTIONS.map((item) => (
+                          <button
+                            key={item.id}
+                            className={`graph-focus-chip ${(config.digital_brain.priority_categories ?? []).includes(item.id) ? "graph-focus-chip--active" : ""}`}
+                            type="button"
+                            onClick={() => toggleDigitalBrainCategory(item.id)}
+                          >
+                            <strong>{item.label}</strong>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <label className="checkbox-field">
+                      <input
+                        type="checkbox"
+                        checked={config.digital_brain.prioritize_recent_files}
+                        onChange={(event) => updateDigitalBrainField("prioritize_recent_files", event.target.checked)}
+                      />
+                      <span>Prioritize recent files when building the first Digital Brain graph.</span>
+                    </label>
+                    <label className="checkbox-field">
+                      <input
+                        type="checkbox"
+                        checked={config.digital_brain.include_notes}
+                        onChange={(event) => updateDigitalBrainField("include_notes", event.target.checked)}
+                      />
+                      <span>Include notes as first-class cognitive sources.</span>
+                    </label>
+                    <label className="checkbox-field">
+                      <input
+                        type="checkbox"
+                        checked={config.digital_brain.include_chats}
+                        onChange={(event) => updateDigitalBrainField("include_chats", event.target.checked)}
+                      />
+                      <span>Reserve room for chat-linked context as that connector lands.</span>
+                    </label>
+                    <p className="microcopy">
+                      DB1 keeps the same approved workspace boundary as Structure, but these settings begin to steer Digital Brain toward selective, staged, high-value indexing.
+                    </p>
+                  </section>
+                ) : null}
                 <section className="panel">
                   <div className="panel__header panel__header--spread">
                     <div>
@@ -2058,18 +2308,22 @@ export default function App() {
           </>
         ) : null}
 
-        {mainTab === "structure" && structureTab === "graph" ? (
+        {isExploreLane && activeExploreView === "graph" ? (
           <>
-            <LaneHeader lane="structure" actions={structureActions} />
+            <LaneHeader lane={activeExploreLane} actions={structureActions} />
             {activeResult?.graph?.nodes?.length ? (
               <section className="panel">
                 <div className="panel__header panel__header--spread">
                   <div>
-                    <span className="eyebrow">Graph</span>
-                    <h3>Visual structure of the current workspace</h3>
+                    <span className="eyebrow">{activeExploreLane === "digital-brain" ? "Focus" : "Graph"}</span>
+                    <h3>{activeExploreLane === "digital-brain" ? "Cognitive focus of the current workspace" : "Visual structure of the current workspace"}</h3>
                   </div>
-                  <button className="secondary-button" type="button" onClick={() => openStructureTab("notes")}>
-                    Open selected notes
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={() => openExploreTab(activeExploreLane, exploreTabIdForView(activeExploreLane, "notes"))}
+                  >
+                    {activeExploreLane === "digital-brain" ? "Open selected memory" : "Open selected notes"}
                   </button>
                 </div>
                 <Suspense
@@ -2104,9 +2358,9 @@ export default function App() {
           </>
         ) : null}
 
-        {mainTab === "structure" && structureTab === "notes" ? (
+        {isExploreLane && activeExploreView === "notes" ? (
           <>
-            <LaneHeader lane="structure" actions={structureActions} />
+            <LaneHeader lane={activeExploreLane} actions={structureActions} />
             {hasFiles ? (
               <section className="notes-grid">
                 <ExplorerPane
@@ -2130,8 +2384,12 @@ export default function App() {
               </section>
             ) : (
               <EmptyTabState
-                title="No notes are visible yet"
-                body="Preview the current workspace or load the guided demo first. Once files are matched, this tab becomes your reading and editing surface."
+                title={activeExploreLane === "digital-brain" ? "No memory candidates are visible yet" : "No notes are visible yet"}
+                body={
+                  activeExploreLane === "digital-brain"
+                    ? "Preview the approved workspace first. Once files are matched, Memory becomes the first-pass cognitive reading surface."
+                    : "Preview the current workspace or load the guided demo first. Once files are matched, this tab becomes your reading and editing surface."
+                }
                 actions={[
                   { label: "Run preview", onClick: () => startWorkspaceJob("preview"), primary: true },
                   guidedDemo ? { label: "Load guided demo", onClick: () => handleLoadExample(guidedDemo, true) } : null,
@@ -2141,9 +2399,9 @@ export default function App() {
           </>
         ) : null}
 
-        {mainTab === "structure" && structureTab === "canvas" ? (
+        {isExploreLane && activeExploreView === "canvas" ? (
           <>
-            <LaneHeader lane="structure" actions={structureActions} />
+            <LaneHeader lane={activeExploreLane} actions={structureActions} />
             <CanvasBoard
               canvases={canvases}
               selectedCanvasId={selectedCanvasId}
@@ -2157,9 +2415,9 @@ export default function App() {
           </>
         ) : null}
 
-        {mainTab === "structure" && structureTab === "history" ? (
+        {isExploreLane && activeExploreView === "history" ? (
           <>
-            <LaneHeader lane="structure" actions={structureActions} />
+            <LaneHeader lane={activeExploreLane} actions={structureActions} />
             <section className="vault-layout">
               <section className="panel">
                 <div className="panel__header panel__header--spread">
@@ -2214,9 +2472,57 @@ export default function App() {
           </>
         ) : null}
 
-        {mainTab === "structure" && structureTab === "saved" ? (
+        {isExploreLane && activeExploreView === "decisions" ? (
           <>
-            <LaneHeader lane="structure" actions={structureActions} />
+            <LaneHeader lane={activeExploreLane} actions={structureActions} />
+            <section className="vault-layout">
+              <section className="panel">
+                <div className="panel__header">
+                  <div>
+                    <span className="eyebrow">Decisions</span>
+                    <h3>Early decision candidates from the current workspace</h3>
+                  </div>
+                </div>
+                {decisionCandidates.length ? (
+                  <ul className="compact-list">
+                    {decisionCandidates.map((file) => (
+                      <li key={file.id}>
+                        <button className="quick-result" type="button" onClick={() => selectFile(file)}>
+                          <strong>{file.label}</strong>
+                          <span>{file.rel_path}</span>
+                          <em>{file.summary || file.source_name || file.source}</em>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="empty-copy">
+                    No decision candidates are visible yet. This first phase uses simple document signals; deeper decision extraction comes in later phases.
+                  </p>
+                )}
+              </section>
+              <section className="panel">
+                <div className="panel__header">
+                  <div>
+                    <span className="eyebrow">What this phase does</span>
+                    <h3>Selective decision scaffolding</h3>
+                  </div>
+                </div>
+                <div className="metrics-grid">
+                  <MetricCard label="Candidates" value={decisionCandidates.length} hint="Heuristic decision-like files" />
+                  <MetricCard label="Notes linked" value={hasFiles ? Math.min(files.length, 12) : 0} hint="Current cognitive scope" />
+                </div>
+                <p className="microcopy">
+                  Digital Brain starts by surfacing likely decision artifacts from approved workspace files. Later phases will add evidence chains, decision provenance, and stronger extraction.
+                </p>
+              </section>
+            </section>
+          </>
+        ) : null}
+
+        {isExploreLane && activeExploreView === "saved" ? (
+          <>
+            <LaneHeader lane={activeExploreLane} actions={structureActions} />
             <section className="vault-layout">
               <section className="panel">
                 <div className="panel__header">
@@ -2262,9 +2568,9 @@ export default function App() {
           </>
         ) : null}
 
-        {mainTab === "structure" && structureTab === "advanced" ? (
+        {isExploreLane && activeExploreView === "advanced" ? (
           <>
-            <LaneHeader lane="structure" actions={structureActions} />
+            <LaneHeader lane={activeExploreLane} actions={structureActions} />
             <section className="vault-layout">
               <div className="vault-layout__main">
                 <PresetPanel
@@ -2311,6 +2617,15 @@ export default function App() {
                       <span className="eyebrow">Overview</span>
                       <h3>Current code-mapping state</h3>
                     </div>
+                  </div>
+                  <div className="field-grid">
+                    <label>
+                      <span>Worker mode</span>
+                      <select value={logicWorkerProfile} onChange={(event) => setLogicWorkerProfile(event.target.value)}>
+                        <option value="default">Default ({DEFAULT_WORKER_COUNT} workers)</option>
+                        <option value="aggressive">Aggressive ({workerCountForProfile("aggressive")} workers)</option>
+                      </select>
+                    </label>
                   </div>
                   <div className="metrics-grid">
                     <MetricCard label="Profiles" value={logicProfiles.length} hint="Stored logic runs" />

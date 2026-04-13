@@ -1,3 +1,5 @@
+import { DEFAULT_WORKER_COUNT } from "./lib/workerPolicy";
+
 async function request(path, options = {}) {
   const response = await fetch(path, {
     headers: {
@@ -57,10 +59,10 @@ export function fetchJobs() {
   return request("/api/jobs");
 }
 
-export function createJob(kind, config, clean = true) {
+export function createJob(kind, config, clean = true, workerProfile = "default") {
   return request("/api/jobs", {
     method: "POST",
-    body: JSON.stringify({ kind, config, clean }),
+    body: JSON.stringify({ kind, config, clean, worker_profile: workerProfile }),
   });
 }
 
@@ -138,17 +140,17 @@ export function restoreSnapshot(snapshotId) {
   });
 }
 
-export function previewWorkspace(config, clean = true) {
+export function previewWorkspace(config, clean = true, workerProfile = "default") {
   return request("/api/preview", {
     method: "POST",
-    body: JSON.stringify({ config, clean }),
+    body: JSON.stringify({ config, clean, worker_profile: workerProfile }),
   });
 }
 
-export function buildWorkspace(config, clean = true) {
+export function buildWorkspace(config, clean = true, workerProfile = "default") {
   return request("/api/build", {
     method: "POST",
-    body: JSON.stringify({ config, clean }),
+    body: JSON.stringify({ config, clean, worker_profile: workerProfile }),
   });
 }
 
@@ -193,7 +195,7 @@ export function chooseNativePath(kind = "directory") {
   });
 }
 
-export function createLogicProfile(config, maxWorkers = 4) {
+export function createLogicProfile(config, maxWorkers = DEFAULT_WORKER_COUNT) {
   return request("/api/logic/profile", {
     method: "POST",
     body: JSON.stringify({ config, max_workers: maxWorkers }),
@@ -223,7 +225,7 @@ export function applyPatchPreview(previewId) {
   });
 }
 
-export function createParallelScanProfile(config, maxWorkers = 4) {
+export function createParallelScanProfile(config, maxWorkers = DEFAULT_WORKER_COUNT) {
   return request("/api/parallel-scan/profile", {
     method: "POST",
     body: JSON.stringify({ config, max_workers: maxWorkers }),
