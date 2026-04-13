@@ -326,8 +326,9 @@ def build_adapter_patch_gate(payload: BuildTaskRequest) -> dict:
         bundle = load_snapshot_bundle(bundles[0]["id"]) if bundles else None
     if not bundle:
         raise HTTPException(status_code=400, detail="Create a preview or build snapshot bundle before generating a patch preview")
+    explain_bundle_payload = load_explain_bundle(payload.explain_bundle_id) if payload.explain_bundle_id else None
     try:
-        adapter_run = run_build_adapter(payload, bundle)
+        adapter_run = run_build_adapter(payload, bundle, explain_bundle_payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return create_build_patch_preview(bundle, adapter_run)
