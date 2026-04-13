@@ -75,6 +75,41 @@ def _normalize_config(config: dict, *, base_dir: Path) -> dict:
     return normalized
 
 
+def _canonicalize_config(config: dict | None) -> dict | None:
+    if not isinstance(config, dict):
+        return None
+    normalized = deepcopy(config)
+    access = normalized.get("access", {})
+    normalized["access"] = {
+        "allowed_roots": sorted(access.get("allowed_roots", [])),
+        "blocked_paths": sorted(access.get("blocked_paths", [])),
+        "blocked_patterns": sorted(access.get("blocked_patterns", [])),
+        "enforce_copy_mode": bool(access.get("enforce_copy_mode", True)),
+    }
+    normalized["default_exclude"] = sorted(normalized.get("default_exclude", []))
+    normalized["default_include"] = sorted(normalized.get("default_include", []))
+    normalized["sources"] = sorted(
+        [
+            {
+                "name": source.get("name"),
+                "category": source.get("category"),
+                "path": source.get("path"),
+                "include": sorted(source.get("include", [])),
+                "exclude": sorted(source.get("exclude", [])),
+                "mode": source.get("mode"),
+                "max_file_size_bytes": source.get("max_file_size_bytes"),
+            }
+            for source in normalized.get("sources", [])
+        ],
+        key=lambda item: (
+            item.get("name") or "",
+            item.get("category") or "",
+            item.get("path") or "",
+        ),
+    )
+    return normalized
+
+
 def load_examples() -> list[dict]:
     examples: list[dict] = []
 
@@ -709,10 +744,6 @@ def load_workspace_config() -> dict:
     if isinstance(saved, dict):
         return saved
 
-    examples = load_examples()
-    if examples:
-        return deepcopy(examples[0]["config"])
-
     return {
         "vault_name": "Context Vault Studio",
         "output_dir": str((REPO_ROOT / "build" / "context-vault-studio").resolve()),
@@ -736,7 +767,15 @@ def save_workspace_config(config: dict) -> None:
 
 def load_last_result() -> dict | None:
     payload = _read_json(LAST_RESULT_PATH)
-    return payload if isinstance(payload, dict) else None
+    if not isinstance(payload, dict):
+        return None
+
+    current_config = load_workspace_config()
+    result_config = payload.get("config")
+    if _canonicalize_config(current_config) != _canonicalize_config(result_config):
+        return None
+
+    return payload
 
 
 def save_last_result(result: dict) -> None:

@@ -971,6 +971,9 @@ export default function App() {
   function patchConfig(nextConfig) {
     setConfig(normalizeConfig(nextConfig));
     setInspectResults({});
+    setPreview(null);
+    setBuildResult(null);
+    setHistoryComparison(null);
     setNotice("");
     setError("");
   }

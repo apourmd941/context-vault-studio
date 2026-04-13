@@ -7,9 +7,14 @@ from fastapi.testclient import TestClient
 
 def make_client(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("CONTEXT_VAULT_STATE_DIR", str(tmp_path / "state"))
-    from context_vault_studio.api.app import app
+    import importlib
+    import context_vault_studio.storage as storage_module
+    import context_vault_studio.api.app as app_module
 
-    return TestClient(app)
+    importlib.reload(storage_module)
+    app_module = importlib.reload(app_module)
+
+    return TestClient(app_module.app)
 
 
 def test_native_dialog_endpoint_can_be_mocked(tmp_path: Path, monkeypatch) -> None:
@@ -78,6 +83,87 @@ def test_preview_and_build_round_trip(tmp_path: Path, monkeypatch) -> None:
     detail_json = bundle_detail.json()
     assert detail_json["contents"]["file_manifest"]["summary"]["file_count"] == 2
     assert "architecture_summary" in detail_json["contents"]
+
+
+def test_bootstrap_ignores_stale_last_result_when_config_changes(tmp_path: Path, monkeypatch) -> None:
+    state_dir = tmp_path / "state"
+    monkeypatch.setenv("CONTEXT_VAULT_STATE_DIR", str(state_dir))
+    import importlib
+    import context_vault_studio.storage as storage_module
+    import context_vault_studio.api.app as app_module
+
+    importlib.reload(storage_module)
+    app_module = importlib.reload(app_module)
+
+    state_dir.mkdir(parents=True, exist_ok=True)
+    (state_dir / "workspace_config.json").write_text(
+        """
+{
+  "vault_name": "Current",
+  "output_dir": "/tmp/current",
+  "default_mode": "copy",
+  "max_file_size_bytes": 5000000,
+  "default_exclude": [],
+  "default_include": [],
+  "access": {
+    "allowed_roots": ["/tmp/current"],
+    "blocked_paths": [],
+    "blocked_patterns": [],
+    "enforce_copy_mode": true
+  },
+  "sources": [
+    {
+      "name": "current",
+      "category": "Docs",
+      "path": "/tmp/current",
+      "include": ["*.md"],
+      "exclude": []
+    }
+  ]
+}
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (state_dir / "last_result.json").write_text(
+        """
+{
+  "config": {
+    "vault_name": "Old",
+    "output_dir": "/tmp/old",
+    "default_mode": "copy",
+    "max_file_size_bytes": 5000000,
+    "default_exclude": [],
+    "default_include": [],
+    "access": {
+      "allowed_roots": ["/tmp/old"],
+      "blocked_paths": [],
+      "blocked_patterns": [],
+      "enforce_copy_mode": true
+    },
+    "sources": [
+      {
+        "name": "old",
+        "category": "Docs",
+        "path": "/tmp/old",
+        "include": ["*.md"],
+        "exclude": []
+      }
+    ]
+  },
+  "summary": {
+    "file_count": 1
+  }
+}
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    client = TestClient(app_module.app)
+    response = client.get("/api/bootstrap")
+    assert response.status_code == 200
+    assert response.json()["last_result"] is None
 
 
 def test_path_inspect_lists_children(tmp_path: Path, monkeypatch) -> None:
@@ -211,7 +297,7 @@ def test_bootstrap_includes_guided_demo_example(tmp_path: Path, monkeypatch) -> 
     payload = response.json()
     labels = [example["label"] for example in payload["examples"]]
     assert "Guided Demo" in labels
-    assert payload["config"]["sources"]
+    assert payload["config"]["sources"] == []
 
 
 def test_build_adapter_contracts_and_capabilities(tmp_path: Path, monkeypatch) -> None:
