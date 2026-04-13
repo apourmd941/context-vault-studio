@@ -82,6 +82,7 @@ The app now opens with a simpler `Vault` home first.
 - `Graph`
   - inspect the current local graph and jump back into notes
 - current result also carries a reusable snapshot bundle for later Explain / Build-style workflows
+- the `V2 studio` panel now exposes Logic, Explain, Build, delta, apply, and history actions from the current workspace
 
 The first recommended run is:
 
@@ -201,3 +202,8 @@ npm --prefix frontend run build
 ```
 
 See `RELEASE_READINESS.md` for the current release-hardening checklist.
+See `RUN_AND_TOUR.md` for the quickest guided run-through.
+The repo also includes:
+
+- Playwright smoke scaffolding under `frontend/tests-e2e`
+- a lightweight Electron scaffold under `desktop/`

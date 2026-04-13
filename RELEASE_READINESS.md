@@ -18,6 +18,9 @@ The repo now includes:
 - logic profiles
 - explain bundles
 - unified history timeline
+- compact frontend artifact panel for the v2 backend surfaces
+- Playwright smoke-test scaffold
+- Electron desktop scaffold
 
 ## Release Checklist
 
@@ -29,11 +32,13 @@ The repo now includes:
 - [x] docs reflect the guided demo and simplified UI
 - [x] docs reflect the v2 backend surfaces through Phase 21
 - [x] skip-CI push convention is documented in practice for this repo history
+- [x] browser smoke scaffold runs locally against the live app
+- [x] desktop packaging scaffold can produce an unpacked local app bundle
 
 ## Still Worth Doing Later
 
-- [ ] end-to-end browser tests for the guided demo and advanced flows
-- [ ] packaged desktop distribution flow
+- [ ] fuller end-to-end browser coverage beyond the current smoke scaffold
+- [ ] signed and polished desktop distribution flow
 - [ ] more polished screenshots and walkthrough assets
 - [ ] frontend surfaces for the new v2 backend artifacts
 - [ ] stronger production UX around Build, Logic, Explain, and history views

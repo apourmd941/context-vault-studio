@@ -1,0 +1,32 @@
+{
+  "name": "context-vault-studio-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Electron wrapper for Context Vault Studio",
+  "author": "Aidin Pour",
+  "main": "main.cjs",
+  "scripts": {
+    "dev": "electron .",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^31.0.2",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.apourmd941.context-vault-studio",
+    "files": [
+      "main.cjs",
+      "preload.cjs"
+    ],
+    "mac": {
+      "target": ["dmg", "zip"]
+    },
+    "win": {
+      "target": ["nsis", "zip"]
+    },
+    "linux": {
+      "target": ["AppImage", "tar.gz"]
+    }
+  }
+}

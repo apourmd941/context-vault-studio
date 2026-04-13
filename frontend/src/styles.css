@@ -411,6 +411,33 @@ code,
   margin-top: 18px;
 }
 
+.artifact-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.artifact-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.artifact-note,
+.artifact-timeline {
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid rgba(155, 140, 255, 0.12);
+  border-radius: var(--radius-md);
+  background: rgba(14, 17, 24, 0.7);
+}
+
+.artifact-note {
+  display: grid;
+  gap: 6px;
+}
+
 .vault-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(340px, 0.95fr);

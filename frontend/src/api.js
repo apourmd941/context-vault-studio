@@ -185,3 +185,64 @@ export function exportBundle() {
     method: "POST",
   });
 }
+
+export function createLogicProfile(config, maxWorkers = 4) {
+  return request("/api/logic/profile", {
+    method: "POST",
+    body: JSON.stringify({ config, max_workers: maxWorkers }),
+  });
+}
+
+export function createExplainBundle(snapshotBundleId, logicProfileId = null) {
+  return request("/api/explain/bundles", {
+    method: "POST",
+    body: JSON.stringify({
+      snapshot_bundle_id: snapshotBundleId,
+      logic_profile_id: logicProfileId,
+    }),
+  });
+}
+
+export function createPatchPreview(payload) {
+  return request("/api/build-adapters/patch-gate", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function applyPatchPreview(previewId) {
+  return request(`/api/build-adapters/apply-preview/${previewId}`, {
+    method: "POST",
+  });
+}
+
+export function createParallelScanProfile(config, maxWorkers = 4) {
+  return request("/api/parallel-scan/profile", {
+    method: "POST",
+    body: JSON.stringify({ config, max_workers: maxWorkers }),
+  });
+}
+
+export function createDeltaSnapshot(config, previousSnapshotBundleId) {
+  return request("/api/parallel-scan/delta", {
+    method: "POST",
+    body: JSON.stringify({
+      config,
+      previous_snapshot_bundle_id: previousSnapshotBundleId,
+    }),
+  });
+}
+
+export function fetchHistoryTimeline() {
+  return request("/api/history/timeline");
+}
+
+export function compareHistorySnapshots(leftSnapshotBundleId, rightSnapshotBundleId) {
+  return request("/api/history/compare", {
+    method: "POST",
+    body: JSON.stringify({
+      left_snapshot_bundle_id: leftSnapshotBundleId,
+      right_snapshot_bundle_id: rightSnapshotBundleId,
+    }),
+  });
+}

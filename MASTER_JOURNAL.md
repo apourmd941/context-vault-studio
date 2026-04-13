@@ -216,6 +216,9 @@ Turn the earlier Obsidian-style mapping prototype into a real shareable app with
 - refreshed the README to reflect the much larger v2 backend surface
 - added a release-readiness checklist file for the current repo state
 - captured what is verified now versus what still belongs in later product hardening
+- added a run-and-tour guide
+- added a Playwright smoke scaffold
+- added a lightweight Electron desktop scaffold
 
 ## Verification
 

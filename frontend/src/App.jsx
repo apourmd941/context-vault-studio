@@ -5,16 +5,24 @@ import CanvasBoard from "./CanvasBoard";
 import ExplorerPane from "./ExplorerPane";
 import GraphMap from "./GraphMap";
 import {
+  applyPatchPreview,
+  compareHistorySnapshots,
   createBookmark,
   createCanvas,
   createFile,
   createJob,
+  createDeltaSnapshot,
+  createExplainBundle,
+  createLogicProfile,
+  createParallelScanProfile,
+  createPatchPreview,
   createPreset,
   deletePreset,
   exportBundle,
   fetchBootstrap,
   fetchBuildHistory,
   fetchFilePreview,
+  fetchHistoryTimeline,
   fetchJob,
   inspectPath,
   restoreSnapshot,
@@ -338,6 +346,101 @@ function ResultSpotlight({ result, outputDir, snapshotBundle, onOpenNotes, onOpe
 }
 
 
+function ArtifactStatusPanel({
+  logicProfiles,
+  explainBundles,
+  patchPreviews,
+  applyRuns,
+  deltaSnapshots,
+  parallelProfiles,
+  timeline,
+  comparison,
+  onRunLogicProfile,
+  onCreateExplainBundle,
+  onCreatePatchPreview,
+  onApplyPatchPreview,
+  onCreateDeltaSnapshot,
+  onRunParallelProfile,
+  onCompareSnapshots,
+  busy,
+}) {
+  const latestLogic = logicProfiles[0];
+  const latestExplain = explainBundles[0];
+  const latestPatch = patchPreviews[0];
+  const latestApply = applyRuns[0];
+  const latestDelta = deltaSnapshots[0];
+  const latestParallel = parallelProfiles[0];
+  const timelineItems = timeline.slice(0, 5);
+
+  return (
+    <section className="panel">
+      <div className="panel__header panel__header--spread">
+        <div>
+          <span className="eyebrow">V2 studio</span>
+          <h3>Build, logic, explain, and history</h3>
+        </div>
+        <div className="hero__actions hero__actions--tight">
+          <button className="secondary-button" type="button" onClick={onRunLogicProfile} disabled={!!busy}>
+            Logic profile
+          </button>
+          <button className="secondary-button" type="button" onClick={onCreateExplainBundle} disabled={!!busy}>
+            Explain bundle
+          </button>
+          <button className="secondary-button" type="button" onClick={onCreatePatchPreview} disabled={!!busy}>
+            Patch preview
+          </button>
+        </div>
+      </div>
+      <div className="artifact-grid">
+        <MetricCard label="Logic profiles" value={logicProfiles.length} hint={latestLogic ? latestLogic.label : "Not generated yet"} />
+        <MetricCard label="Explain bundles" value={explainBundles.length} hint={latestExplain ? latestExplain.label : "Not generated yet"} />
+        <MetricCard label="Patch previews" value={patchPreviews.length} hint={latestPatch ? latestPatch.label : "Not generated yet"} />
+        <MetricCard label="Apply runs" value={applyRuns.length} hint={latestApply ? latestApply.label : "Not generated yet"} />
+        <MetricCard label="Delta snapshots" value={deltaSnapshots.length} hint={latestDelta ? latestDelta.label : "Not generated yet"} />
+        <MetricCard label="Parallel scans" value={parallelProfiles.length} hint={latestParallel ? latestParallel.label : "Not generated yet"} />
+      </div>
+      <div className="artifact-actions">
+        <button className="ghost-button" type="button" onClick={onApplyPatchPreview} disabled={!!busy || !latestPatch}>
+          Apply latest preview
+        </button>
+        <button className="ghost-button" type="button" onClick={onCreateDeltaSnapshot} disabled={!!busy}>
+          Delta snapshot
+        </button>
+        <button className="ghost-button" type="button" onClick={onRunParallelProfile} disabled={!!busy}>
+          Parallel scan
+        </button>
+        <button className="ghost-button" type="button" onClick={onCompareSnapshots} disabled={!!busy}>
+          Compare snapshots
+        </button>
+      </div>
+      {comparison ? (
+        <div className="artifact-note">
+          <strong>Latest comparison</strong>
+          <span>
+            {comparison.summary.changed_count} changed, {comparison.summary.added_count} added, {comparison.summary.removed_count} removed
+          </span>
+        </div>
+      ) : null}
+      <div className="artifact-timeline">
+        <span className="eyebrow">Recent timeline</span>
+        {timelineItems.length ? (
+          <ul className="compact-list compact-list--tight">
+            {timelineItems.map((item) => (
+              <li key={`${item.kind}-${item.id}`}>
+                <strong>{item.label}</strong>
+                <span>{item.kind}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="empty-copy">No timeline artifacts yet.</p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+
 function SourceCard({
   source,
   index,
@@ -514,6 +617,14 @@ export default function App() {
   const [bookmarks, setBookmarks] = useState([]);
   const [snapshots, setSnapshots] = useState([]);
   const [snapshotBundles, setSnapshotBundles] = useState([]);
+  const [buildPatchPreviews, setBuildPatchPreviews] = useState([]);
+  const [buildApplyRuns, setBuildApplyRuns] = useState([]);
+  const [parallelScanProfiles, setParallelScanProfiles] = useState([]);
+  const [deltaSnapshots, setDeltaSnapshots] = useState([]);
+  const [logicProfiles, setLogicProfiles] = useState([]);
+  const [explainBundles, setExplainBundles] = useState([]);
+  const [historyTimeline, setHistoryTimeline] = useState([]);
+  const [historyComparison, setHistoryComparison] = useState(null);
   const [canvases, setCanvases] = useState([]);
   const [selectedCanvasId, setSelectedCanvasId] = useState("");
   const [jobs, setJobs] = useState([]);
@@ -557,6 +668,21 @@ export default function App() {
   const blockedRuleCount =
     (config.access?.blocked_paths?.length ?? 0) + (config.access?.blocked_patterns?.length ?? 0);
 
+  async function refreshV2Artifacts() {
+    const [bootstrapPayload, timeline] = await Promise.all([fetchBootstrap(), fetchHistoryTimeline()]);
+    startTransition(() => {
+      setSnapshotBundles(bootstrapPayload.snapshot_bundles ?? []);
+      setBuildPatchPreviews(bootstrapPayload.build_patch_previews ?? []);
+      setBuildApplyRuns(bootstrapPayload.build_apply_runs ?? []);
+      setParallelScanProfiles(bootstrapPayload.parallel_scan_profiles ?? []);
+      setDeltaSnapshots(bootstrapPayload.delta_snapshots ?? []);
+      setLogicProfiles(bootstrapPayload.logic_profiles ?? []);
+      setExplainBundles(bootstrapPayload.explain_bundles ?? []);
+      setHistoryTimeline(timeline ?? []);
+    });
+    return bootstrapPayload;
+  }
+
   const outgoingLinks = useMemo(() => {
     if (!selectedFile) {
       return [];
@@ -587,6 +713,12 @@ export default function App() {
           setBookmarks(payload.bookmarks ?? []);
           setSnapshots(payload.snapshots ?? []);
           setSnapshotBundles(payload.snapshot_bundles ?? []);
+          setBuildPatchPreviews(payload.build_patch_previews ?? []);
+          setBuildApplyRuns(payload.build_apply_runs ?? []);
+          setParallelScanProfiles(payload.parallel_scan_profiles ?? []);
+          setDeltaSnapshots(payload.delta_snapshots ?? []);
+          setLogicProfiles(payload.logic_profiles ?? []);
+          setExplainBundles(payload.explain_bundles ?? []);
           setCanvases(payload.canvases ?? []);
           setSelectedCanvasId((payload.canvases ?? [])[0]?.id || "");
           setJobs(payload.jobs ?? []);
@@ -604,6 +736,7 @@ export default function App() {
             );
           }
         });
+        fetchHistoryTimeline().then((timeline) => setHistoryTimeline(timeline ?? [])).catch(() => {});
       } catch (loadError) {
         setError(loadError.message);
       } finally {
@@ -913,6 +1046,175 @@ export default function App() {
       setNotice(`Bundle exported to ${payload.path}`);
     } catch (bundleError) {
       setError(bundleError.message);
+    }
+  }
+
+  async function handleRunLogicProfile() {
+    const validationError = validateWorkspaceRun(serializeConfig(config));
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    setBusy("logic-profile");
+    setError("");
+    setNotice("");
+    try {
+      const payload = await createLogicProfile(serializeConfig(config), 4);
+      await refreshV2Artifacts();
+      setNotice(`Logic profile ready for ${payload.profile.summary.file_count} files.`);
+    } catch (logicError) {
+      setError(logicError.message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function handleCreateExplainBundle() {
+    const snapshotBundle = snapshotBundles[0] || activeResult?.snapshot_bundle;
+    if (!snapshotBundle?.id) {
+      setError("Run preview or build first so there is a snapshot bundle to explain.");
+      return;
+    }
+    setBusy("explain-bundle");
+    setError("");
+    setNotice("");
+    try {
+      const payload = await createExplainBundle(snapshotBundle.id, logicProfiles[0]?.id || null);
+      await refreshV2Artifacts();
+      setNotice(`Explain bundle created with ${payload.bundle.summary.top_file_count} top files.`);
+    } catch (explainError) {
+      setError(explainError.message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function handleCreatePatchPreview() {
+    const snapshotBundle = snapshotBundles[0] || activeResult?.snapshot_bundle;
+    if (!snapshotBundle?.id) {
+      setError("Run preview or build first so there is a snapshot bundle to use.");
+      return;
+    }
+    const goal = window.prompt("Build goal", "Generate a deterministic scoped improvement plan");
+    if (!goal) {
+      return;
+    }
+    const piecesValue = window.prompt("SLCS pieces (comma separated)", "docs_cleanup_piece");
+    const selectedPieces = (piecesValue || "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const selectedFiles = selectedFile?.rel_path ? [selectedFile.rel_path] : (activeResult?.files ?? []).slice(0, 3).map((file) => file.rel_path);
+
+    setBusy("patch-preview");
+    setError("");
+    setNotice("");
+    try {
+      const payload = await createPatchPreview({
+        goal,
+        snapshot_bundle_id: snapshotBundle.id,
+        explain_bundle_id: explainBundles[0]?.id || null,
+        adapter_id: "deterministic",
+        selected_slcs_pieces: selectedPieces,
+        selected_files: selectedFiles,
+        allowed_targets: config.sources.map((source) => source.path).filter(Boolean),
+        forbidden_paths: config.access.blocked_paths ?? [],
+      });
+      await refreshV2Artifacts();
+      setNotice(`Patch preview created with ${payload.copied_file_count} scoped input files.`);
+    } catch (patchError) {
+      setError(patchError.message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function handleApplyPatchPreview() {
+    const previewRecord = buildPatchPreviews[0];
+    if (!previewRecord?.id) {
+      setError("Create a patch preview first.");
+      return;
+    }
+    setBusy("apply-preview");
+    setError("");
+    setNotice("");
+    try {
+      const payload = await applyPatchPreview(previewRecord.id);
+      await refreshV2Artifacts();
+      setNotice(`Scratch apply run created with ${payload.apply_summary.changed_file_count} changed files.`);
+    } catch (applyError) {
+      setError(applyError.message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function handleCreateDeltaSnapshot() {
+    const snapshotBundle = snapshotBundles[0] || activeResult?.snapshot_bundle;
+    if (!snapshotBundle?.id) {
+      setError("Run preview or build first so there is a previous snapshot to compare against.");
+      return;
+    }
+    const validationError = validateWorkspaceRun(serializeConfig(config));
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    setBusy("delta-snapshot");
+    setError("");
+    setNotice("");
+    try {
+      const payload = await createDeltaSnapshot(serializeConfig(config), snapshotBundle.id);
+      await refreshV2Artifacts();
+      setNotice(
+        `Delta snapshot created: ${payload.delta.changed_files.length} changed, ${payload.delta.added_files.length} added, ${payload.delta.removed_files.length} removed.`,
+      );
+    } catch (deltaError) {
+      setError(deltaError.message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function handleRunParallelProfile() {
+    const validationError = validateWorkspaceRun(serializeConfig(config));
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    setBusy("parallel-profile");
+    setError("");
+    setNotice("");
+    try {
+      const payload = await createParallelScanProfile(serializeConfig(config), 4);
+      await refreshV2Artifacts();
+      setNotice(`Parallel scan profile captured for ${payload.profile.summary.file_count} files.`);
+    } catch (parallelError) {
+      setError(parallelError.message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function handleCompareSnapshots() {
+    const [left, right] = snapshotBundles;
+    if (!left?.id || !right?.id) {
+      setError("At least two snapshot bundles are needed to compare history.");
+      return;
+    }
+    setBusy("compare-snapshots");
+    setError("");
+    setNotice("");
+    try {
+      const payload = await compareHistorySnapshots(left.id, right.id);
+      setHistoryComparison(payload);
+      setNotice(
+        `Compared snapshots: ${payload.summary.changed_count} changed, ${payload.summary.added_count} added, ${payload.summary.removed_count} removed.`,
+      );
+    } catch (compareError) {
+      setError(compareError.message);
+    } finally {
+      setBusy("");
     }
   }
 
@@ -1383,6 +1685,25 @@ export default function App() {
                     </ul>
                   ) : null}
                 </section>
+
+                <ArtifactStatusPanel
+                  logicProfiles={logicProfiles}
+                  explainBundles={explainBundles}
+                  patchPreviews={buildPatchPreviews}
+                  applyRuns={buildApplyRuns}
+                  deltaSnapshots={deltaSnapshots}
+                  parallelProfiles={parallelScanProfiles}
+                  timeline={historyTimeline}
+                  comparison={historyComparison}
+                  onRunLogicProfile={handleRunLogicProfile}
+                  onCreateExplainBundle={handleCreateExplainBundle}
+                  onCreatePatchPreview={handleCreatePatchPreview}
+                  onApplyPatchPreview={handleApplyPatchPreview}
+                  onCreateDeltaSnapshot={handleCreateDeltaSnapshot}
+                  onRunParallelProfile={handleRunParallelProfile}
+                  onCompareSnapshots={handleCompareSnapshots}
+                  busy={busy}
+                />
               </div>
             </section>
 
@@ -1587,6 +1908,25 @@ export default function App() {
                     </div>
                     <SourceSummaryList sourceSummaries={activeResult?.source_summaries} />
                   </section>
+
+                  <ArtifactStatusPanel
+                    logicProfiles={logicProfiles}
+                    explainBundles={explainBundles}
+                    patchPreviews={buildPatchPreviews}
+                    applyRuns={buildApplyRuns}
+                    deltaSnapshots={deltaSnapshots}
+                    parallelProfiles={parallelScanProfiles}
+                    timeline={historyTimeline}
+                    comparison={historyComparison}
+                    onRunLogicProfile={handleRunLogicProfile}
+                    onCreateExplainBundle={handleCreateExplainBundle}
+                    onCreatePatchPreview={handleCreatePatchPreview}
+                    onApplyPatchPreview={handleApplyPatchPreview}
+                    onCreateDeltaSnapshot={handleCreateDeltaSnapshot}
+                    onRunParallelProfile={handleRunParallelProfile}
+                    onCompareSnapshots={handleCompareSnapshots}
+                    busy={busy}
+                  />
                 </div>
               </section>
             ) : null}
