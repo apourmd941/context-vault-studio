@@ -13,6 +13,7 @@ from context_vault_studio.storage import (
     REPO_ROOT,
     attach_digital_brain_index,
     attach_snapshot_bundle,
+    append_model_snapshot,
     append_build_history,
     save_last_result,
     save_workspace_config,
@@ -96,7 +97,7 @@ def _run_job(job_id: str, kind: str, config: dict, clean: bool, worker_profile: 
             config,
             base_dir=Path(REPO_ROOT),
             dry_run=(kind == "preview"),
-            clean=clean,
+            clean=(clean if kind != "refresh" else False),
             worker_profile=worker_profile,
             progress_callback=progress_callback,
         )
@@ -104,23 +105,37 @@ def _run_job(job_id: str, kind: str, config: dict, clean: bool, worker_profile: 
         result["digital_brain_index_payload"] = build_digital_brain_index_payload(result["config"], result)
         attach_digital_brain_index(result)
         save_workspace_config(result["config"])
-        if kind == "build":
+        if kind in {"build", "refresh"}:
             save_last_result(result)
             append_build_history(
                 {
                     "id": str(uuid.uuid4()),
                     "created_at": _now_iso(),
+                    "kind": kind,
                     "summary": result["summary"],
                     "artifacts": result["artifacts"],
                     "snapshot_bundle": result.get("snapshot_bundle"),
                     "config": result["config"],
                 }
             )
+            workflow = (result.get("config") or {}).get("model_workflow", {})
+            if kind == "build" and workflow.get("auto_snapshot_after_build", True):
+                append_model_snapshot(
+                    result=result,
+                    trigger="build",
+                    retention=int(workflow.get("auto_snapshot_retention", 24)),
+                )
+            if kind == "refresh" and workflow.get("auto_snapshot_after_refresh", True):
+                append_model_snapshot(
+                    result=result,
+                    trigger="refresh",
+                    retention=int(workflow.get("auto_snapshot_retention", 24)),
+                )
         _update_job(
             job_id,
             status="completed",
             progress=100,
-            message=f"{kind.title()} complete",
+            message=f"{'Refresh' if kind == 'refresh' else kind.title()} complete",
             telemetry={
                 "reserved_budget": 0,
                 "budget_cap": 0,

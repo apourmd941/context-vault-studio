@@ -71,6 +71,13 @@ const EMPTY_DIGITAL_BRAIN = {
   priority_categories: ["conversations", "documents", "memories", "decisions", "topics"],
 };
 
+const EMPTY_MODEL_WORKFLOW = {
+  auto_snapshot_after_build: true,
+  auto_snapshot_after_refresh: true,
+  auto_snapshot_on_monitored_changes: false,
+  auto_snapshot_retention: 24,
+};
+
 const EXPLORE_SUB_TABS = [
   { id: "setup", label: "Setup" },
   { id: "graph", label: "Graph" },
@@ -219,6 +226,10 @@ function syncAccessWithFolders(config) {
       ...(config.digital_brain ?? {}),
       priority_categories: [...(config.digital_brain?.priority_categories ?? EMPTY_DIGITAL_BRAIN.priority_categories)],
     },
+    model_workflow: {
+      ...EMPTY_MODEL_WORKFLOW,
+      ...(config.model_workflow ?? {}),
+    },
   };
 }
 
@@ -252,6 +263,7 @@ function createEmptyConfig() {
     default_include: [],
     access: { ...EMPTY_ACCESS },
     digital_brain: { ...EMPTY_DIGITAL_BRAIN },
+    model_workflow: { ...EMPTY_MODEL_WORKFLOW },
     sources: [],
   };
 }
@@ -273,6 +285,10 @@ function normalizeConfig(config = {}) {
       ...EMPTY_DIGITAL_BRAIN,
       ...(config.digital_brain ?? {}),
       priority_categories: [...(config.digital_brain?.priority_categories ?? EMPTY_DIGITAL_BRAIN.priority_categories)],
+    },
+    model_workflow: {
+      ...EMPTY_MODEL_WORKFLOW,
+      ...(config.model_workflow ?? {}),
     },
     sources: (config.sources ?? []).map(normalizeSource),
   });
@@ -296,6 +312,11 @@ function serializeConfig(config) {
       ...EMPTY_DIGITAL_BRAIN,
       ...(syncedConfig.digital_brain ?? {}),
       priority_categories: [...(syncedConfig.digital_brain?.priority_categories ?? [])],
+    },
+    model_workflow: {
+      ...EMPTY_MODEL_WORKFLOW,
+      ...(syncedConfig.model_workflow ?? {}),
+      auto_snapshot_retention: Number(syncedConfig.model_workflow?.auto_snapshot_retention) || EMPTY_MODEL_WORKFLOW.auto_snapshot_retention,
     },
     sources: syncedConfig.sources.map((source) => ({
       ...source,
@@ -343,6 +364,21 @@ function LaneHeader({ lane, actions }) {
         <p>{copy.description}</p>
       </div>
       <div className="view-header__actions">{actions}</div>
+    </section>
+  );
+}
+
+
+function CompactLaneHeader({ lane, actions, summary }) {
+  const copy = LANE_COPY[lane];
+  return (
+    <section className={`compact-lane-header compact-lane-header--${lane}`}>
+      <div className="compact-lane-header__body">
+        <span className="eyebrow">{copy.eyebrow}</span>
+        <strong>{copy.title}</strong>
+        {summary ? <span className="microcopy">{summary}</span> : null}
+      </div>
+      <div className="compact-lane-header__actions">{actions}</div>
     </section>
   );
 }
@@ -489,6 +525,12 @@ function ResultSpotlight({ result, outputDir, snapshotBundle, onOpenNotes, onOpe
           <div className="microcopy">{result.summary?.generated_at || "—"}</div>
         </div>
       </div>
+      <div className="result-summary">
+        <div>
+          <span className="eyebrow">Model workflow</span>
+          <div className="microcopy">Preview checks scope. Build writes and activates the model. Refresh updates the active built model without forcing a full clean rebuild.</div>
+        </div>
+      </div>
       {snapshotBundle ? (
         <div className="result-summary">
           <div>
@@ -505,6 +547,23 @@ function ResultSpotlight({ result, outputDir, snapshotBundle, onOpenNotes, onOpe
             <div className="microcopy">SLCS context: {snapshotBundle.slcs_status || "not_configured"}</div>
           </div>
         </div>
+      ) : null}
+      {result.summary?.timings ? (
+        <section className="panel panel--tight">
+          <div className="panel__header">
+            <div>
+              <span className="eyebrow">Stage timings</span>
+              <h3>Execution breakdown</h3>
+            </div>
+          </div>
+          <div className="metrics-grid">
+            <MetricCard label="Discovery" value={`${result.summary.timings.source_discovery_seconds ?? 0}s`} hint="Source walk and candidate discovery" />
+            <MetricCard label="Analysis" value={`${result.summary.timings.file_analysis_seconds ?? 0}s`} hint="Hashing, summaries, file analysis" />
+            <MetricCard label="Edge linking" value={`${result.summary.timings.edge_linking_seconds ?? 0}s`} hint="Markdown relationship extraction" />
+            <MetricCard label="Output" value={`${result.summary.timings.output_seconds ?? 0}s`} hint="Copy/link and artifact output" />
+            <MetricCard label="Total" value={`${result.summary.timings.total_seconds ?? 0}s`} hint="End-to-end runtime" />
+          </div>
+        </section>
       ) : null}
     </section>
   );
@@ -1106,9 +1165,11 @@ export default function App() {
             }
             setBuildHistory(await fetchBuildHistory());
             setNotice(
-              `Vault built with ${result.summary?.file_count ?? 0} files at ${
-                result.artifacts?.vault_dir || result.artifacts?.output_dir
-              }.`,
+              job.kind === "refresh"
+                ? `Model refreshed with ${result.summary?.file_count ?? 0} files and updated graph state.`
+                : `Vault built with ${result.summary?.file_count ?? 0} files at ${
+                    result.artifacts?.vault_dir || result.artifacts?.output_dir
+                  }.`,
             );
             openExploreTab(jobExploreLane, result.summary?.file_count ? exploreTabIdForView(jobExploreLane, "notes") : "setup");
           }
@@ -1182,6 +1243,16 @@ export default function App() {
       ...config,
       digital_brain: {
         ...config.digital_brain,
+        [field]: value,
+      },
+    });
+  }
+
+  function updateModelWorkflowField(field, value) {
+    patchConfig({
+      ...config,
+      model_workflow: {
+        ...config.model_workflow,
         [field]: value,
       },
     });
@@ -1361,7 +1432,7 @@ export default function App() {
     setNotice("");
     try {
       setJobExploreLane(preferredExploreLane);
-      const job = await createJob(kind, payload, true, workerProfileForLane(preferredExploreLane));
+      const job = await createJob(kind, payload, kind === "refresh" ? false : true, workerProfileForLane(preferredExploreLane));
       setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)].slice(0, 12));
       setActiveJobId(job.id);
     } catch (jobError) {
@@ -1832,6 +1903,9 @@ export default function App() {
     <>
       <button className="secondary-button" type="button" onClick={handleAddFolderByBrowse} disabled={!!busy}>
         Add folder
+      </button>
+      <button className="secondary-button" type="button" onClick={() => startWorkspaceJob("refresh")} disabled={!!busy || !buildResult}>
+        {busy === "refresh" ? "Refreshing..." : "Refresh model"}
       </button>
       <button className="secondary-button" type="button" onClick={() => startWorkspaceJob("preview")} disabled={!!busy}>
         {busy === "preview" ? "Previewing..." : "Preview"}
@@ -2347,6 +2421,59 @@ export default function App() {
                   </section>
                 ) : null}
                 <section className="panel">
+                  <div className="panel__header">
+                    <div>
+                      <span className="eyebrow">Model workflow</span>
+                      <h3>Build, refresh, and snapshot behavior</h3>
+                    </div>
+                  </div>
+                  <div className="field-grid">
+                    <label>
+                      <span>Auto snapshot retention</span>
+                      <input
+                        type="number"
+                        min="1"
+                        value={config.model_workflow.auto_snapshot_retention}
+                        onChange={(event) => updateModelWorkflowField("auto_snapshot_retention", Number(event.target.value) || 1)}
+                      />
+                    </label>
+                  </div>
+                  <label className="checkbox-field">
+                    <input
+                      type="checkbox"
+                      checked={config.model_workflow.auto_snapshot_after_build}
+                      onChange={(event) => updateModelWorkflowField("auto_snapshot_after_build", event.target.checked)}
+                    />
+                    <span>Automatically create a model snapshot after build.</span>
+                  </label>
+                  <label className="checkbox-field">
+                    <input
+                      type="checkbox"
+                      checked={config.model_workflow.auto_snapshot_after_refresh}
+                      onChange={(event) => updateModelWorkflowField("auto_snapshot_after_refresh", event.target.checked)}
+                    />
+                    <span>Automatically create a model snapshot after refresh.</span>
+                  </label>
+                  <label className="checkbox-field">
+                    <input
+                      type="checkbox"
+                      checked={config.model_workflow.auto_snapshot_on_monitored_changes}
+                      onChange={(event) => updateModelWorkflowField("auto_snapshot_on_monitored_changes", event.target.checked)}
+                    />
+                    <span>Reserve autorun snapshots for monitored file changes later.</span>
+                  </label>
+                  <div className="artifact-note">
+                    <strong>Auto-snapshot rules</strong>
+                    <span>After build: creates an automatic model-state snapshot when enabled.</span>
+                    <span>After refresh: creates an automatic model-state snapshot when enabled.</span>
+                    <span>Monitored changes: reserved for later live-monitor integration.</span>
+                    <span>Retention: keeps the newest auto model snapshots up to your limit; older auto model snapshots are pruned. Manual snapshots remain untouched.</span>
+                  </div>
+                  <p className="microcopy">
+                    Preview is the dry run. Build creates and activates the working model. Refresh updates that active model without requiring a clean rebuild. Auto snapshots preserve model history so you can move backward and forward through versions.
+                  </p>
+                </section>
+                <section className="panel">
                   <div className="panel__header panel__header--spread">
                     <div>
                       <span className="eyebrow">Sandbox</span>
@@ -2463,10 +2590,18 @@ export default function App() {
 
         {isExploreLane && activeExploreView === "graph" ? (
           <>
-            <LaneHeader lane={activeExploreLane} actions={structureActions} />
+            <CompactLaneHeader
+              lane={activeExploreLane}
+              actions={structureActions}
+              summary={
+                activeExploreLane === "digital-brain"
+                  ? "Focus uses the current approved workspace to surface the first cognitive graph."
+                  : "Preview checks scope. Build writes and activates the model. Refresh updates the active built model."
+              }
+            />
             {(activeExploreLane === "digital-brain" ? digitalBrainFocusGraph?.nodes?.length : activeResult?.graph?.nodes?.length) ? (
-              <section className="panel">
-                <div className="panel__header panel__header--spread">
+              <section className="panel panel--graph">
+                <div className="panel__header panel__header--spread panel__header--compact">
                   <div>
                     <span className="eyebrow">{activeExploreLane === "digital-brain" ? "Focus" : "Graph"}</span>
                     <h3>{activeExploreLane === "digital-brain" ? "Cognitive focus of the current workspace" : "Visual structure of the current workspace"}</h3>
@@ -2730,8 +2865,8 @@ export default function App() {
                   <ul className="compact-list">
                     {buildHistory.map((entry) => (
                       <li key={entry.id}>
-                        <strong>{entry.summary?.vault_name || "Vault build"}</strong>
-                        <span>{entry.summary?.file_count || 0} files</span>
+                        <strong>{entry.summary?.vault_name || "Vault model"}</strong>
+                        <span>{entry.kind || "build"} • {entry.summary?.file_count || 0} files</span>
                       </li>
                     ))}
                   </ul>

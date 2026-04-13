@@ -11,7 +11,10 @@ export default function SnapshotPanel({ snapshots, onRestore }) {
           <div key={snapshot.id} className="sidebar-card">
             <div className="sidebar-card__main">
               <strong>{snapshot.label || snapshot.kind}</strong>
-              <span>{snapshot.created_at}</span>
+              <span>
+                {snapshot.created_at}
+                {snapshot.trigger ? ` • ${snapshot.trigger}` : ""}
+              </span>
             </div>
             <button className="ghost-button" type="button" onClick={() => onRestore(snapshot.id)}>
               Restore

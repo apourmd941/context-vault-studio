@@ -635,6 +635,7 @@ def build_workspace(request: BuildRequest) -> dict:
         {
             "id": result["summary"]["generated_at"],
             "created_at": result["summary"]["generated_at"],
+            "kind": "build",
             "summary": result["summary"],
             "artifacts": result["artifacts"],
             "snapshot_bundle": result.get("snapshot_bundle"),
@@ -799,6 +800,16 @@ def restore_snapshot(payload: SnapshotRestorePayload) -> dict:
         target = Path(snapshot["path"]).resolve()
         target.write_text(snapshot.get("content", ""), encoding="utf-8")
         return {"status": "ok", "kind": "file", "path": str(target)}
+
+    if snapshot["kind"] == "model_state":
+        data = snapshot.get("content") or {}
+        config = data.get("config")
+        result = data.get("result")
+        if config:
+            save_workspace_config(config)
+        if result:
+            save_last_result(result)
+        return {"status": "ok", "kind": "model_state"}
 
     raise HTTPException(status_code=400, detail="Unsupported snapshot kind")
 

@@ -62,6 +62,7 @@ def test_preview_and_build_round_trip(tmp_path: Path, monkeypatch) -> None:
     preview_json = preview.json()
     assert preview_json["summary"]["file_count"] == 2
     assert preview_json["summary"]["edge_count"] >= 1
+    assert "timings" in preview_json["summary"]
     assert preview_json["snapshot_bundle"]["kind"] == "preview"
     assert Path(preview_json["snapshot_bundle"]["artifacts"]["file_manifest_file"]).exists()
 
@@ -83,6 +84,47 @@ def test_preview_and_build_round_trip(tmp_path: Path, monkeypatch) -> None:
     detail_json = bundle_detail.json()
     assert detail_json["contents"]["file_manifest"]["summary"]["file_count"] == 2
     assert "architecture_summary" in detail_json["contents"]
+
+
+def test_preview_graph_includes_folder_hierarchy_nodes(tmp_path: Path, monkeypatch) -> None:
+    source_dir = tmp_path / "docs"
+    nested_dir = source_dir / "guides" / "api"
+    nested_dir.mkdir(parents=True)
+    (nested_dir / "README.md").write_text("# API Guide\n", encoding="utf-8")
+
+    client = make_client(tmp_path, monkeypatch)
+    payload = {
+        "config": {
+            "vault_name": "Hierarchy Vault",
+            "output_dir": str(tmp_path / "output"),
+            "default_mode": "copy",
+            "max_file_size_bytes": 5000000,
+            "default_exclude": [],
+            "default_include": [],
+            "sources": [
+                {
+                    "name": "demo-docs",
+                    "category": "Docs",
+                    "path": str(source_dir),
+                    "include": ["**/*.md"],
+                    "exclude": [],
+                }
+            ],
+        },
+        "clean": True,
+    }
+
+    preview = client.post("/api/preview", json=payload)
+    assert preview.status_code == 200
+    preview_json = preview.json()
+    node_ids = {node["id"] for node in preview_json["graph"]["nodes"]}
+    edge_pairs = {(edge["from"], edge["to"]) for edge in preview_json["graph"]["edges"]}
+
+    assert "folder:demo-docs:guides" in node_ids
+    assert "folder:demo-docs:guides/api" in node_ids
+    assert ("source:demo-docs", "folder:demo-docs:guides") in edge_pairs
+    assert ("folder:demo-docs:guides", "folder:demo-docs:guides/api") in edge_pairs
+    assert ("folder:demo-docs:guides/api", "file:demo-docs:guides/api/README.md") in edge_pairs
 
 
 def test_bootstrap_ignores_stale_last_result_when_config_changes(tmp_path: Path, monkeypatch) -> None:

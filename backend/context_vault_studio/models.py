@@ -57,6 +57,13 @@ class DigitalBrainSettings(BaseModel):
     )
 
 
+class ModelWorkflowSettings(BaseModel):
+    auto_snapshot_after_build: bool = True
+    auto_snapshot_after_refresh: bool = True
+    auto_snapshot_on_monitored_changes: bool = False
+    auto_snapshot_retention: int = Field(default=24, ge=1, le=200)
+
+
 class WorkspaceConfig(BaseModel):
     vault_name: str = "Context Vault Studio"
     output_dir: str = "./build/context-vault-studio"
@@ -66,6 +73,7 @@ class WorkspaceConfig(BaseModel):
     default_include: list[str] = Field(default_factory=list)
     access: AccessPolicy = Field(default_factory=AccessPolicy)
     digital_brain: DigitalBrainSettings = Field(default_factory=DigitalBrainSettings)
+    model_workflow: ModelWorkflowSettings = Field(default_factory=ModelWorkflowSettings)
     sources: list[SourceConfig] = Field(default_factory=list)
 
 
@@ -76,7 +84,7 @@ class BuildRequest(BaseModel):
 
 
 class JobRequest(BaseModel):
-    kind: Literal["preview", "build"]
+    kind: Literal["preview", "build", "refresh"]
     config: WorkspaceConfig
     clean: bool = True
     worker_profile: Literal["default", "aggressive"] = "default"

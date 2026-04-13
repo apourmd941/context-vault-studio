@@ -5,6 +5,7 @@ function naturalCompare(left, right) {
 
 const TYPE_METADATA = {
   source: { id: "source", label: "source", accent: "#7ce6d3" },
+  folder: { id: "folder", label: "folder", accent: "#7fb8ff" },
   "markdown-note": { id: "markdown-note", label: "markdown note", accent: "#9b8cff" },
   "other-file": { id: "other-file", label: "other file", accent: "#f6c177" },
   project: { id: "project", label: "project", accent: "#5ecdbc" },

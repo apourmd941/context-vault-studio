@@ -702,6 +702,32 @@ def append_snapshot(snapshot: dict) -> dict:
     return record
 
 
+def append_model_snapshot(*, result: dict, trigger: str, retention: int) -> dict:
+    snapshots = load_snapshots()
+    record = {
+        "id": str(uuid.uuid4()),
+        "created_at": _now_iso(),
+        "kind": "model_state",
+        "label": f"Active model ({trigger})",
+        "trigger": trigger,
+        "mode": "auto",
+        "content": {
+            "config": result.get("config"),
+            "result": result,
+        },
+    }
+    next_snapshots = [record]
+    kept_auto_model_states = 0
+    for snapshot in snapshots:
+        if snapshot.get("kind") == "model_state" and snapshot.get("mode") == "auto":
+            if kept_auto_model_states >= retention - 1:
+                continue
+            kept_auto_model_states += 1
+        next_snapshots.append(snapshot)
+    _write_json(SNAPSHOTS_PATH, next_snapshots[:200])
+    return record
+
+
 def load_canvases() -> list[dict]:
     payload = _read_json(CANVASES_PATH)
     if isinstance(payload, list):
@@ -770,6 +796,22 @@ def load_workspace_config() -> dict:
             "blocked_paths": [],
             "blocked_patterns": [],
             "enforce_copy_mode": True,
+        },
+        "digital_brain": {
+            "scan_mode": "quick_start",
+            "graph_density": "balanced",
+            "enrichment_mode": "background",
+            "retention_mode": "extracted_text",
+            "prioritize_recent_files": True,
+            "include_notes": True,
+            "include_chats": True,
+            "priority_categories": ["conversations", "documents", "memories", "decisions", "topics"],
+        },
+        "model_workflow": {
+            "auto_snapshot_after_build": True,
+            "auto_snapshot_after_refresh": True,
+            "auto_snapshot_on_monitored_changes": False,
+            "auto_snapshot_retention": 24,
         },
         "sources": [],
     }

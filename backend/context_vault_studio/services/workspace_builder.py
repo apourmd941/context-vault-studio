@@ -14,6 +14,7 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from time import perf_counter
 from typing import Iterable
 
 from context_vault_studio.services.worker_policy import (
@@ -105,6 +106,15 @@ class FileCandidate:
     mirrored_rel_path: str
     size_bytes: int
     mtime_ns: int
+
+
+@dataclass(frozen=True)
+class EdgeSourceRecord:
+    source_name: str
+    rel_path: str
+    original_path: str
+    extension: str
+    is_text: bool
 
 
 def now_iso() -> str:
@@ -264,8 +274,8 @@ def ensure_clean_dir(path: Path, clean: bool) -> None:
 def resolve_markdown_target(
     raw_target: str,
     current_rel: Path,
-    rel_lookup: dict[str, FileRecord],
-    stem_lookup: dict[str, list[FileRecord]],
+    rel_lookup: dict[str, str],
+    stem_lookup: dict[str, tuple[str, ...]],
 ) -> str | None:
     target = raw_target.strip()
     if not target or target.startswith("#"):
@@ -292,15 +302,26 @@ def resolve_markdown_target(
             return maybe
 
     stem = Path(target).stem.lower()
-    matches = stem_lookup.get(stem, [])
+    matches = list(stem_lookup.get(stem, ()))
     if len(matches) == 1:
-        return matches[0].rel_path
+        return matches[0]
     return None
 
 
+def build_link_context(source_files: list[FileRecord]) -> dict[str, dict[str, object]]:
+    rel_lookup = {item.rel_path: item.rel_path for item in source_files}
+    stem_lookup: dict[str, list[str]] = {}
+    for item in source_files:
+        stem_lookup.setdefault(Path(item.rel_path).stem.lower(), []).append(item.rel_path)
+    return {
+        "rel_lookup": rel_lookup,
+        "stem_lookup": {key: tuple(values) for key, values in stem_lookup.items()},
+    }
+
+
 def extract_edges(
-    record: FileRecord,
-    source_files: list[FileRecord],
+    record: EdgeSourceRecord,
+    link_context: dict[str, dict[str, object]],
 ) -> list[dict[str, str]]:
     if not record.is_text or record.extension != ".md":
         return []
@@ -310,10 +331,8 @@ def extract_edges(
     if not text:
         return []
 
-    rel_lookup = {item.rel_path: item for item in source_files}
-    stem_lookup: dict[str, list[FileRecord]] = {}
-    for item in source_files:
-        stem_lookup.setdefault(Path(item.rel_path).stem.lower(), []).append(item)
+    rel_lookup = link_context["rel_lookup"]
+    stem_lookup = link_context["stem_lookup"]
 
     current_rel = Path(record.rel_path)
     edges: list[dict[str, str]] = []
@@ -350,10 +369,10 @@ def extract_edges(
     return edges
 
 
-def extract_edges_batch(records: list[FileRecord], source_files: list[FileRecord]) -> list[dict[str, str]]:
+def extract_edges_batch(records: list[EdgeSourceRecord], link_context: dict[str, dict[str, object]]) -> list[dict[str, str]]:
     edges: list[dict[str, str]] = []
     for record in records:
-        edges.extend(extract_edges(record, source_files))
+        edges.extend(extract_edges(record, link_context))
     return edges
 
 
@@ -432,10 +451,10 @@ def chunk_candidates(candidates: list[FileCandidate], worker_count: int) -> list
     return [candidates[index:index + target_chunk_size] for index in range(0, len(candidates), target_chunk_size)]
 
 
-def chunk_records(records: list[FileRecord], worker_count: int) -> list[list[FileRecord]]:
+def chunk_records(records: list[EdgeSourceRecord], worker_count: int) -> list[list[EdgeSourceRecord]]:
     if not records:
         return []
-    target_chunk_size = max(96, min(512, len(records) // max(worker_count * 2, 1) or 1))
+    target_chunk_size = max(384, min(2048, len(records) // max(worker_count, 1) or 1))
     return [records[index:index + target_chunk_size] for index in range(0, len(records), target_chunk_size)]
 
 
@@ -486,6 +505,7 @@ def scan_source(
     )
 
     walked_entries = 0
+    discovery_started = perf_counter()
     for current_root, dirnames, filenames in os.walk(source_path):
         current_root_path = Path(current_root)
         rel_dir = current_root_path.relative_to(source_path)
@@ -578,12 +598,18 @@ def scan_source(
                     "current_stage": "source-discovery",
                 },
             })
-        return records, skipped
+        return records, skipped, {
+            "discovery_seconds": round(perf_counter() - discovery_started, 4),
+            "analysis_seconds": 0.0,
+            "cache_hits": 0,
+            "cache_misses": 0,
+        }
 
     max_workers = min(clamp_worker_count(worker_count), len(candidates))
     cache_source = analysis_cache or {}
     cache_target = cache_updates if cache_updates is not None else {}
     batches = chunk_candidates(candidates, max_workers)
+    discovery_seconds = perf_counter() - discovery_started
     if progress_callback:
         progress_callback(
             {
@@ -598,6 +624,7 @@ def scan_source(
             }
         )
 
+    analysis_started = perf_counter()
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         future_map = {
             executor.submit(
@@ -634,7 +661,20 @@ def scan_source(
 
     records.sort(key=lambda item: item.rel_path)
 
-    return records, skipped
+    cache_hits = sum(
+        1
+        for candidate in candidates
+        if candidate.original_path in cache_source
+        and cache_source[candidate.original_path].get("mtime_ns") == candidate.mtime_ns
+        and cache_source[candidate.original_path].get("size_bytes") == candidate.size_bytes
+    )
+
+    return records, skipped, {
+        "discovery_seconds": round(discovery_seconds, 4),
+        "analysis_seconds": round(perf_counter() - analysis_started, 4),
+        "cache_hits": cache_hits,
+        "cache_misses": len(candidates) - cache_hits,
+    }
 
 
 def split_worker_counts(total_workers: int, group_count: int) -> list[int]:
@@ -983,6 +1023,7 @@ def build_workspace_from_config(
     parallel_output: bool | None = None,
     progress_callback=None,
 ) -> dict:
+    build_started = perf_counter()
     normalized = resolve_config_paths(config, base_dir=base_dir)
     vault_name = normalized.get("vault_name", "Curated Context Vault")
     output_dir = Path(normalized.get("output_dir", base_dir / "build" / "context-vault")).resolve()
@@ -1024,12 +1065,23 @@ def build_workspace_from_config(
     source_summaries: list[dict] = []
     nodes: list[dict[str, object]] = []
     edges: list[dict[str, str]] = []
+    stage_timings = {
+        "workspace_init_seconds": 0.0,
+        "source_discovery_seconds": 0.0,
+        "file_analysis_seconds": 0.0,
+        "edge_linking_seconds": 0.0,
+        "output_seconds": 0.0,
+        "total_seconds": 0.0,
+    }
+    source_timing_details: list[dict] = []
     analysis_cache = load_file_analysis_cache()
     cache_updates: dict[str, dict] = {}
     cache_lock = threading.Lock()
 
     if parallel_output is None:
         parallel_output = not dry_run and worker_profile == "aggressive"
+
+    stage_timings["workspace_init_seconds"] = round(perf_counter() - build_started, 4)
 
     source_progress_lock = threading.Lock()
     source_progress_fractions = [0.0] * len(source_specs)
@@ -1058,6 +1110,7 @@ def build_workspace_from_config(
         )
 
     def process_source(source_index: int, source: dict, assigned_workers: int, source_thread_count: int) -> dict:
+        source_started = perf_counter()
         source_name = source["name"]
         update_source_progress(
             source_index,
@@ -1072,7 +1125,7 @@ def build_workspace_from_config(
                 ),
             },
         )
-        records, skipped = scan_source(
+        records, skipped, scan_timings = scan_source(
             source,
             defaults,
             worker_count=assigned_workers,
@@ -1081,9 +1134,21 @@ def build_workspace_from_config(
             cache_lock=cache_lock,
             progress_callback=lambda detail: update_source_progress(source_index, source_name, detail),
         )
+        edge_started = perf_counter()
         link_edges: list[dict[str, str]] = []
         edge_workers = min(max(1, assigned_workers), len(records))
-        edge_batches = chunk_records(records, edge_workers)
+        edge_records = [
+            EdgeSourceRecord(
+                source_name=record.source_name,
+                rel_path=record.rel_path,
+                original_path=record.original_path,
+                extension=record.extension,
+                is_text=record.is_text,
+            )
+            for record in records
+        ]
+        edge_batches = chunk_records(edge_records, edge_workers)
+        link_context = build_link_context(records)
         update_source_progress(
             source_index,
             source_name,
@@ -1098,16 +1163,16 @@ def build_workspace_from_config(
             },
         )
         if len(edge_batches) <= 1:
-            for record in records:
-                link_edges.extend(extract_edges(record, records))
+            for record in edge_records:
+                link_edges.extend(extract_edges(record, link_context))
         else:
             with ProcessPoolExecutor(max_workers=edge_workers) as executor:
                 future_map = {
-                    executor.submit(extract_edges_batch, batch, records): len(batch)
+                    executor.submit(extract_edges_batch, batch, link_context): len(batch)
                     for batch in edge_batches
                 }
                 linked = 0
-                total = len(records)
+                total = len(edge_records)
                 for future in as_completed(future_map):
                     link_edges.extend(future.result())
                     linked += future_map[future]
@@ -1143,6 +1208,11 @@ def build_workspace_from_config(
             "records": records,
             "skipped": skipped,
             "link_edges": link_edges,
+            "timings": {
+                **scan_timings,
+                "edge_linking_seconds": round(perf_counter() - edge_started, 4),
+                "total_seconds": round(perf_counter() - source_started, 4),
+            },
             "summary": summarize_source(
                 source,
                 records,
@@ -1173,6 +1243,13 @@ def build_workspace_from_config(
         records = result["records"]
         skipped = result["skipped"]
         summary = result["summary"]
+        source_timings = result["timings"]
+        source_node_id = f"source:{source['name']}"
+
+        stage_timings["source_discovery_seconds"] += source_timings["discovery_seconds"]
+        stage_timings["file_analysis_seconds"] += source_timings["analysis_seconds"]
+        stage_timings["edge_linking_seconds"] += source_timings["edge_linking_seconds"]
+        source_timing_details.append({"source_name": source["name"], **source_timings})
 
         source_summaries.append(summary)
         all_records.extend(records)
@@ -1180,7 +1257,7 @@ def build_workspace_from_config(
 
         nodes.append(
             {
-                "id": f"source:{source['name']}",
+                "id": source_node_id,
                 "type": "source",
                 "name": source["name"],
                 "category": source.get("category", "Uncategorized"),
@@ -1190,7 +1267,32 @@ def build_workspace_from_config(
             }
         )
 
+        folder_nodes: dict[str, dict[str, object]] = {}
+        folder_edges: set[tuple[str, str]] = set()
+
         for record in records:
+            parts = Path(record.rel_path).parts
+            parent_node_id = source_node_id
+
+            if len(parts) > 1:
+                for depth, part in enumerate(parts[:-1], start=1):
+                    folder_rel_path = Path(*parts[:depth]).as_posix()
+                    folder_node_id = f"folder:{record.source_name}:{folder_rel_path}"
+                    if folder_node_id not in folder_nodes:
+                        folder_nodes[folder_node_id] = {
+                            "id": folder_node_id,
+                            "type": "folder",
+                            "source": record.source_name,
+                            "category": record.category,
+                            "rel_path": folder_rel_path,
+                            "path": folder_rel_path,
+                            "label": part,
+                            "name": part,
+                            "depth": depth,
+                        }
+                    folder_edges.add((parent_node_id, folder_node_id))
+                    parent_node_id = folder_node_id
+
             nodes.append(
                 {
                     "id": f"file:{record.source_name}:{record.rel_path}",
@@ -1209,10 +1311,20 @@ def build_workspace_from_config(
             edges.append(
                 {
                     "type": "contains",
-                    "from": f"source:{record.source_name}",
+                    "from": parent_node_id,
                     "to": f"file:{record.source_name}:{record.rel_path}",
                 }
             )
+
+        nodes.extend(folder_nodes.values())
+        edges.extend(
+            {
+                "type": "contains",
+                "from": from_id,
+                "to": to_id,
+            }
+            for from_id, to_id in sorted(folder_edges)
+        )
 
         edges.extend(result["link_edges"])
 
@@ -1229,6 +1341,7 @@ def build_workspace_from_config(
         next_cache.update(cache_updates)
         save_file_analysis_cache(next_cache)
 
+    output_started = perf_counter()
     if not dry_run:
         output_tasks: list[tuple[Path, Path, str]] = []
         source_note_payloads: list[tuple[Path, str]] = []
@@ -1282,6 +1395,7 @@ def build_workspace_from_config(
 
         for note_path, content in source_note_payloads:
             note_path.write_text(content, encoding="utf-8")
+    stage_timings["output_seconds"] = round(perf_counter() - output_started, 4)
 
     summary = {
         "generated_at": generated_at,
@@ -1293,6 +1407,10 @@ def build_workspace_from_config(
         "node_count": len(nodes),
         "edge_count": len(edges),
     }
+    stage_timings["total_seconds"] = round(perf_counter() - build_started, 4)
+    stage_timings = {key: round(value, 4) for key, value in stage_timings.items()}
+    summary["timings"] = stage_timings
+    summary["source_timings"] = source_timing_details
 
     artifacts = {
         "output_dir": str(output_dir),
