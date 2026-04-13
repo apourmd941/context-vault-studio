@@ -105,6 +105,10 @@ export function fetchBuildHistory() {
   return request("/api/build-history");
 }
 
+export function fetchDigitalBrainIndex(indexId) {
+  return request(`/api/digital-brain/indexes/${indexId}`);
+}
+
 export function fetchCanvases() {
   return request("/api/canvases");
 }

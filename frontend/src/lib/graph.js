@@ -3,11 +3,21 @@ function naturalCompare(left, right) {
 }
 
 
-const TYPE_METADATA = [
-  { id: "source", label: "source", accent: "#7ce6d3" },
-  { id: "markdown-note", label: "markdown note", accent: "#9b8cff" },
-  { id: "other-file", label: "other file", accent: "#f6c177" },
-];
+const TYPE_METADATA = {
+  source: { id: "source", label: "source", accent: "#7ce6d3" },
+  "markdown-note": { id: "markdown-note", label: "markdown note", accent: "#9b8cff" },
+  "other-file": { id: "other-file", label: "other file", accent: "#f6c177" },
+  project: { id: "project", label: "project", accent: "#5ecdbc" },
+  topic: { id: "topic", label: "topic", accent: "#7fb3ff" },
+  memory: { id: "memory", label: "memory", accent: "#f7a072" },
+  decision: { id: "decision", label: "decision", accent: "#ff8f8f" },
+  document: { id: "document", label: "document", accent: "#f6c177" },
+  note: { id: "note", label: "note", accent: "#9b8cff" },
+  chat: { id: "chat", label: "chat", accent: "#80d4ff" },
+  summary: { id: "summary", label: "summary", accent: "#b5b8ff" },
+  task: { id: "task", label: "task", accent: "#b8e986" },
+  person: { id: "person", label: "person", accent: "#ffd166" },
+};
 
 
 export function graphNodeLabel(node) {
@@ -15,14 +25,22 @@ export function graphNodeLabel(node) {
 }
 
 
-export function graphNodeTypeKey(node) {
+export function graphNodeTypeMeta(node) {
   if (node?.type === "source") {
-    return "source";
+    return TYPE_METADATA.source;
+  }
+  if (node?.type && TYPE_METADATA[node.type]) {
+    return TYPE_METADATA[node.type];
   }
   if ((node?.extension || "").toLowerCase() === ".md") {
-    return "markdown-note";
+    return TYPE_METADATA["markdown-note"];
   }
-  return "other-file";
+  return TYPE_METADATA["other-file"];
+}
+
+
+export function graphNodeTypeKey(node) {
+  return graphNodeTypeMeta(node).id;
 }
 
 
@@ -55,12 +73,16 @@ export function graphNodeFolderLabel(node) {
 
 
 export function buildGraphFocusOptions(graph) {
-  const typeCounts = new Map(TYPE_METADATA.map((item) => [item.id, 0]));
+  const typeCounts = new Map();
   const folderCounts = new Map();
 
   for (const node of graph?.nodes || []) {
-    const typeKey = graphNodeTypeKey(node);
-    typeCounts.set(typeKey, (typeCounts.get(typeKey) || 0) + 1);
+    const typeMeta = graphNodeTypeMeta(node);
+    typeCounts.set(typeMeta.id, {
+      ...typeMeta,
+      count: (typeCounts.get(typeMeta.id)?.count || 0) + 1,
+      kind: "type",
+    });
 
     if (node.type === "source") {
       continue;
@@ -83,13 +105,9 @@ export function buildGraphFocusOptions(graph) {
     folderCounts.set(folderKey, existing);
   }
 
-  const typeOptions = TYPE_METADATA
-    .map((item) => ({
-      ...item,
-      count: typeCounts.get(item.id) || 0,
-      kind: "type",
-    }))
-    .filter((item) => item.count > 0);
+  const typeOptions = [...typeCounts.values()].sort(
+    (left, right) => right.count - left.count || naturalCompare(left.label, right.label),
+  );
 
   const folderOptions = [...folderCounts.values()].sort(
     (left, right) => right.count - left.count || naturalCompare(left.label, right.label),
@@ -115,7 +133,7 @@ export function filterGraphByFocus(graph, { activeChipIds = [] } = {}) {
     const matchesType = activeIds.has(typeKey);
     const matchesFolder = folderKey ? activeIds.has(folderKey) : false;
 
-    if (node.type === "source") {
+    if (node.type === "source" || node.type === "project") {
       if (matchesType) {
         visibleIds.add(node.id);
       }
@@ -132,13 +150,13 @@ export function filterGraphByFocus(graph, { activeChipIds = [] } = {}) {
     for (const edge of graph.edges || []) {
       if (visibleFileIds.has(edge.from)) {
         const candidate = nodeLookup.get(edge.to);
-        if (candidate?.type === "source") {
+        if (candidate?.type === "source" || candidate?.type === "project") {
           visibleIds.add(edge.to);
         }
       }
       if (visibleFileIds.has(edge.to)) {
         const candidate = nodeLookup.get(edge.from);
-        if (candidate?.type === "source") {
+        if (candidate?.type === "source" || candidate?.type === "project") {
           visibleIds.add(edge.from);
         }
       }
@@ -221,8 +239,8 @@ export function selectVisibleGraph(
   let nodes = graph.nodes;
   if (sourceFilter !== "all") {
     nodes = nodes.filter((node) => {
-      if (node.type === "source") {
-        return node.name === sourceFilter;
+      if (node.type === "source" || node.type === "project") {
+        return (node.name || node.label) === sourceFilter;
       }
       return node.source === sourceFilter;
     });
@@ -238,7 +256,7 @@ export function selectVisibleGraph(
   }
 
   const sourceNodes = nodes
-    .filter((node) => node.type === "source")
+    .filter((node) => node.type === "source" || node.type === "project")
     .sort((a, b) => graphNodeLabel(a).localeCompare(graphNodeLabel(b)));
   const fileNodes = nodes
     .filter((node) => node.type !== "source")

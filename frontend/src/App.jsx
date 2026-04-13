@@ -21,6 +21,7 @@ import {
   exportBundle,
   fetchBootstrap,
   fetchBuildHistory,
+  fetchDigitalBrainIndex,
   fetchFilePreview,
   fetchHistoryTimeline,
   fetchJob,
@@ -814,6 +815,7 @@ export default function App() {
   const [explainBundles, setExplainBundles] = useState([]);
   const [digitalBrainIndexes, setDigitalBrainIndexes] = useState([]);
   const [digitalBrainAdapterContracts, setDigitalBrainAdapterContracts] = useState([]);
+  const [digitalBrainIndexDetail, setDigitalBrainIndexDetail] = useState(null);
   const [historyTimeline, setHistoryTimeline] = useState([]);
   const [historyComparison, setHistoryComparison] = useState(null);
   const [buildGoalDraft, setBuildGoalDraft] = useState("Generate a deterministic scoped improvement plan");
@@ -857,10 +859,14 @@ export default function App() {
   const fileLookup = useMemo(() => new Map(files.map((file) => [file.id, file])), [files]);
   const guidedDemo = examples.find((example) => example.id === "guided-demo") || examples[0] || null;
   const latestJob = jobs[0] || null;
+  const activeJob = activeJobId ? jobs.find((job) => job.id === activeJobId) || null : null;
   const hasSources = deferredSources.length > 0;
   const hasFiles = files.length > 0;
   const recentFiles = files.slice(0, 6);
   const latestDigitalBrainIndex = digitalBrainIndexes[0] || activeResult?.digital_brain_index || null;
+  const digitalBrainContents = digitalBrainIndexDetail?.contents || {};
+  const digitalBrainFocusGraph = digitalBrainContents.focus_graph || null;
+  const digitalBrainMemoryShells = digitalBrainContents.memory_shells || [];
   const isExploreLane = mainTab === "structure" || mainTab === "digital-brain";
   const activeExploreLane = mainTab === "digital-brain" ? "digital-brain" : "structure";
   const activeExploreTab = mainTab === "digital-brain" ? digitalBrainTab : structureTab;
@@ -874,6 +880,12 @@ export default function App() {
       .filter((file) => keywordRe.test(`${file.label || ""} ${file.summary || ""} ${file.rel_path || ""}`))
       .slice(0, 12);
   }, [files]);
+  const digitalBrainMemoryCandidates = useMemo(() => {
+    return digitalBrainMemoryShells
+      .map((item) => fileLookup.get(item.file_id))
+      .filter(Boolean)
+      .slice(0, 12);
+  }, [digitalBrainMemoryShells, fileLookup]);
 
   async function refreshV2Artifacts() {
     const [bootstrapPayload, timeline] = await Promise.all([fetchBootstrap(), fetchHistoryTimeline()]);
@@ -1030,6 +1042,23 @@ export default function App() {
   }, [config.access, selectedFile]);
 
   useEffect(() => {
+    async function loadDigitalBrainDetail() {
+      if (!latestDigitalBrainIndex?.id) {
+        setDigitalBrainIndexDetail(null);
+        return;
+      }
+      try {
+        const payload = await fetchDigitalBrainIndex(latestDigitalBrainIndex.id);
+        setDigitalBrainIndexDetail(payload);
+      } catch {
+        setDigitalBrainIndexDetail(null);
+      }
+    }
+
+    loadDigitalBrainDetail();
+  }, [latestDigitalBrainIndex?.id]);
+
+  useEffect(() => {
     if (!activeJobId) {
       return undefined;
     }
@@ -1048,6 +1077,12 @@ export default function App() {
                 ...current.filter((item) => item.id !== result.snapshot_bundle.id),
               ].slice(0, 20));
             }
+            if (result.digital_brain_index) {
+              setDigitalBrainIndexes((current) => [
+                result.digital_brain_index,
+                ...current.filter((item) => item.id !== result.digital_brain_index.id),
+              ].slice(0, 20));
+            }
             setNotice(
               result.summary?.file_count
                 ? `Preview ready. ${result.summary.file_count} files are now visible in the workspace.`
@@ -1061,6 +1096,12 @@ export default function App() {
               setSnapshotBundles((current) => [
                 result.snapshot_bundle,
                 ...current.filter((item) => item.id !== result.snapshot_bundle.id),
+              ].slice(0, 20));
+            }
+            if (result.digital_brain_index) {
+              setDigitalBrainIndexes((current) => [
+                result.digital_brain_index,
+                ...current.filter((item) => item.id !== result.digital_brain_index.id),
               ].slice(0, 20));
             }
             setBuildHistory(await fetchBuildHistory());
@@ -1723,6 +1764,15 @@ export default function App() {
     openExploreTab(preferredExploreLane, exploreTabIdForView(preferredExploreLane, "notes"));
   }
 
+  function selectGraphNode(node) {
+    const file = fileLookup.get(node.id) || fileLookup.get(node.file_id) || null;
+    if (file) {
+      selectFile(file);
+      return;
+    }
+    setSelectedFile(null);
+  }
+
   function selectBookmark(bookmark) {
     if (bookmark.type === "file") {
       const match = files.find((file) => file.original_path === bookmark.path || file.id === bookmark.file_id);
@@ -1933,8 +1983,8 @@ export default function App() {
                   <span className="eyebrow">{activeExploreLane === "digital-brain" ? "Current focus" : "Current map"}</span>
                   <div className="sidebar-card-stack">
                     <div className="sidebar-card sidebar-card--static">
-                      <strong>{activeResult?.summary?.file_count ?? 0} files</strong>
-                      <span>{activeResult?.summary?.edge_count ?? 0} edges</span>
+                      <strong>{activeExploreLane === "digital-brain" ? digitalBrainFocusGraph?.summary?.node_count ?? 0 : activeResult?.summary?.file_count ?? 0} {activeExploreLane === "digital-brain" ? "nodes" : "files"}</strong>
+                      <span>{activeExploreLane === "digital-brain" ? digitalBrainFocusGraph?.summary?.edge_count ?? 0 : activeResult?.summary?.edge_count ?? 0} edges</span>
                       <em>{activeResult ? (activeExploreLane === "digital-brain" ? "Ready to interpret" : "Ready to explore") : "No result yet"}</em>
                     </div>
                   </div>
@@ -2045,10 +2095,26 @@ export default function App() {
         {notice ? <div className="callout callout--success">{notice}</div> : null}
         {busy === "boot" ? <div className="callout">Loading workspace…</div> : null}
         {activeJobId ? (
-          <div className="callout">
-            {(jobs.find((job) => job.id === activeJobId)?.message || "Working")}{" "}
-            {jobs.find((job) => job.id === activeJobId)?.progress ?? 0}%
-          </div>
+          <>
+            <div className="callout">
+              {(activeJob?.message || "Working")} {activeJob?.progress ?? 0}%
+            </div>
+            <section className="panel panel--tight job-telemetry">
+              <div className="panel__header panel__header--spread">
+                <div>
+                  <span className="eyebrow">Worker telemetry</span>
+                  <h3>Live execution budget</h3>
+                </div>
+                <span className="microcopy">{activeJob?.worker_profile || "default"} profile</span>
+              </div>
+              <div className="metrics-grid">
+                <MetricCard label="Reserved budget" value={activeJob?.telemetry?.reserved_budget ?? 0} hint={`of ${activeJob?.telemetry?.budget_cap ?? 0}`} />
+                <MetricCard label="Active processes" value={activeJob?.telemetry?.active_processes ?? 0} hint="Process workers" />
+                <MetricCard label="Active threads" value={activeJob?.telemetry?.active_threads ?? 0} hint="Thread workers" />
+                <MetricCard label="Current stage" value={activeJob?.telemetry?.current_stage || "running"} hint="Live job stage" />
+              </div>
+            </section>
+          </>
         ) : null}
         {!activeJobId && latestJob?.status === "failed" ? (
           <div className="callout callout--error">Last job failed: {latestJob.error || latestJob.message}</div>
@@ -2247,6 +2313,8 @@ export default function App() {
                       <MetricCard label="Indexes" value={digitalBrainIndexes.length} hint="Saved canonical Digital Brain indexes" />
                       <MetricCard label="Objects" value={latestDigitalBrainIndex?.source_object_count ?? 0} hint="Normalized source objects" />
                       <MetricCard label="Episodes" value={latestDigitalBrainIndex?.episode_count ?? 0} hint="Canonical activity episodes" />
+                      <MetricCard label="Focus nodes" value={digitalBrainFocusGraph?.summary?.node_count ?? 0} hint="Surface-pass cognitive graph" />
+                      <MetricCard label="Memory shells" value={digitalBrainMemoryShells.length} hint="First-pass memory candidates" />
                     </div>
                     {digitalBrainAdapterContracts.length ? (
                       <div className="summary-list">
@@ -2396,7 +2464,7 @@ export default function App() {
         {isExploreLane && activeExploreView === "graph" ? (
           <>
             <LaneHeader lane={activeExploreLane} actions={structureActions} />
-            {activeResult?.graph?.nodes?.length ? (
+            {(activeExploreLane === "digital-brain" ? digitalBrainFocusGraph?.nodes?.length : activeResult?.graph?.nodes?.length) ? (
               <section className="panel">
                 <div className="panel__header panel__header--spread">
                   <div>
@@ -2420,20 +2488,19 @@ export default function App() {
                   )}
                 >
                   <GraphMap
-                    graph={activeResult?.graph}
-                    onSelectNode={(node) => {
-                      const file = fileLookup.get(node.id);
-                      if (file) {
-                        selectFile(file);
-                      }
-                    }}
+                    graph={activeExploreLane === "digital-brain" ? digitalBrainFocusGraph : activeResult?.graph}
+                    onSelectNode={selectGraphNode}
                   />
                 </Suspense>
               </section>
             ) : (
               <EmptyTabState
-                title="No graph yet"
-                body="Preview the workspace first. Once files are indexed, the graph will show the source and note relationships here."
+                title={activeExploreLane === "digital-brain" ? "No focus graph yet" : "No graph yet"}
+                body={
+                  activeExploreLane === "digital-brain"
+                    ? "Preview the approved workspace first. The DB3 surface pass will build the first cognitive graph from shallow metadata."
+                    : "Preview the workspace first. Once files are indexed, the graph will show the source and note relationships here."
+                }
                 actions={[
                   { label: "Run preview", onClick: () => startWorkspaceJob("preview"), primary: true },
                   guidedDemo ? { label: "Load guided demo", onClick: () => handleLoadExample(guidedDemo, true) } : null,
@@ -2447,26 +2514,49 @@ export default function App() {
           <>
             <LaneHeader lane={activeExploreLane} actions={structureActions} />
             {hasFiles ? (
-              <section className="notes-grid">
-                <ExplorerPane
-                  tree={tree}
-                  selectedId={selectedFile?.id || ""}
-                  expanded={expandedNodes}
-                  onToggle={toggleNode}
-                  onSelect={selectFile}
-                  onOpenQuickSwitcher={() => setQuickOpen(true)}
-                />
-                <PreviewPane
-                  selectedFile={selectedFile}
-                  preview={filePreview}
-                  busy={filePreviewBusy}
-                  onSelectLinkedFile={selectFile}
-                  backlinks={backlinks}
-                  outgoing={outgoingLinks}
-                  onSaveFile={handleSaveFile}
-                  onBookmarkFile={handleBookmarkFile}
-                />
-              </section>
+              <>
+                {activeExploreLane === "digital-brain" && digitalBrainMemoryCandidates.length ? (
+                  <section className="panel">
+                    <div className="panel__header">
+                      <div>
+                        <span className="eyebrow">Memory candidates</span>
+                        <h3>First-pass memory shells from the current cognitive graph</h3>
+                      </div>
+                    </div>
+                    <ul className="compact-list">
+                      {digitalBrainMemoryCandidates.map((file) => (
+                        <li key={file.id}>
+                          <button className="quick-result" type="button" onClick={() => selectFile(file)}>
+                            <strong>{file.label}</strong>
+                            <span>{file.rel_path}</span>
+                            <em>{file.summary || file.source_name || file.source}</em>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                ) : null}
+                <section className="notes-grid">
+                  <ExplorerPane
+                    tree={tree}
+                    selectedId={selectedFile?.id || ""}
+                    expanded={expandedNodes}
+                    onToggle={toggleNode}
+                    onSelect={selectFile}
+                    onOpenQuickSwitcher={() => setQuickOpen(true)}
+                  />
+                  <PreviewPane
+                    selectedFile={selectedFile}
+                    preview={filePreview}
+                    busy={filePreviewBusy}
+                    onSelectLinkedFile={selectFile}
+                    backlinks={backlinks}
+                    outgoing={outgoingLinks}
+                    onSaveFile={handleSaveFile}
+                    onBookmarkFile={handleBookmarkFile}
+                  />
+                </section>
+              </>
             ) : (
               <EmptyTabState
                 title={activeExploreLane === "digital-brain" ? "No memory candidates are visible yet" : "No notes are visible yet"}

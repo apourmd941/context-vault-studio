@@ -49,6 +49,13 @@ def create_job(*, kind: str, config: dict, clean: bool, worker_profile: str = "d
         "progress": 0,
         "message": "Queued",
         "worker_profile": worker_profile,
+        "telemetry": {
+            "reserved_budget": 0,
+            "budget_cap": 0,
+            "active_processes": 0,
+            "active_threads": 0,
+            "current_stage": "queued",
+        },
         "created_at": now,
         "updated_at": now,
         "result": None,
@@ -74,6 +81,13 @@ def _run_job(job_id: str, kind: str, config: dict, clean: bool, worker_profile: 
             status="running",
             progress=int(progress.get("progress", 0)),
             message=str(progress.get("message", "Working")),
+            telemetry=progress.get("telemetry") or {
+                "reserved_budget": 0,
+                "budget_cap": 0,
+                "active_processes": 0,
+                "active_threads": 0,
+                "current_stage": "running",
+            },
         )
 
     try:
@@ -107,6 +121,13 @@ def _run_job(job_id: str, kind: str, config: dict, clean: bool, worker_profile: 
             status="completed",
             progress=100,
             message=f"{kind.title()} complete",
+            telemetry={
+                "reserved_budget": 0,
+                "budget_cap": 0,
+                "active_processes": 0,
+                "active_threads": 0,
+                "current_stage": "completed",
+            },
             result=result,
         )
     except Exception as exc:
@@ -115,5 +136,12 @@ def _run_job(job_id: str, kind: str, config: dict, clean: bool, worker_profile: 
             status="failed",
             progress=100,
             message="Job failed",
+            telemetry={
+                "reserved_budget": 0,
+                "budget_cap": 0,
+                "active_processes": 0,
+                "active_threads": 0,
+                "current_stage": "failed",
+            },
             error=str(exc),
         )

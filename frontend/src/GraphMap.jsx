@@ -6,6 +6,7 @@ import {
   buildGraphFocusOptions,
   filterGraphByFocus,
   graphNodeLabel,
+  graphNodeTypeMeta,
   searchGraphNodes,
   selectVisibleGraph,
 } from "./lib/graph";
@@ -28,13 +29,7 @@ function nodeAccent(node, selectedNodeId, highlightNodeIds) {
   if (highlightNodeIds.has(node.id)) {
     return "#7ce6d3";
   }
-  if (node.type === "source") {
-    return "#5ecdbc";
-  }
-  if ((node.extension || "").toLowerCase() === ".md") {
-    return "#9b8cff";
-  }
-  return "#f6c177";
+  return graphNodeTypeMeta(node).accent;
 }
 
 
@@ -137,8 +132,8 @@ export default function GraphMap({ graph, onSelectNode }) {
   );
 
   const sourceOptions = (deferredGraph?.nodes || [])
-    .filter((node) => node.type === "source")
-    .map((node) => node.name)
+    .filter((node) => node.type === "source" || node.type === "project")
+    .map((node) => node.name || node.label)
     .sort((a, b) => a.localeCompare(b));
 
   const searchResults = useMemo(() => searchGraphNodes(sourceScopedGraph, searchQuery, 6), [searchQuery, sourceScopedGraph]);
@@ -281,7 +276,7 @@ export default function GraphMap({ graph, onSelectNode }) {
 
   function handleSearchSelect(node) {
     setSelectedNodeId(node.id);
-    setSourceFilter(node.type === "source" ? node.name : node.source || "all");
+    setSourceFilter(node.type === "source" || node.type === "project" ? node.name || node.label : node.source || "all");
     setActiveFocusChipIds(new Set());
     setSearchQuery(graphNodeLabel(node));
     setMaxNodes((current) => Math.max(current, Math.min(DEFAULT_NODE_CAP, nodeCapMax)));

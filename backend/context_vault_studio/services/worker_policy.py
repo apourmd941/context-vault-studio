@@ -32,6 +32,14 @@ def aggressive_worker_count() -> int:
     return clamp_worker_count(AGGRESSIVE_WORKER_COUNT)
 
 
+def get_worker_budget_state() -> dict[str, int]:
+    with _budget_condition:
+        return {
+            "reserved_budget": _reserved_workers,
+            "budget_cap": available_worker_budget(),
+        }
+
+
 @contextmanager
 def reserve_worker_budget(
     requested: int | None = None,

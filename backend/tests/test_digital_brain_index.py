@@ -77,3 +77,4 @@ def test_preview_builds_digital_brain_index(tmp_path: Path, monkeypatch) -> None
     detail_json = detail.json()
     assert detail_json["contents"]["summary"]["source_object_count"] == 1
     assert detail_json["contents"]["source_registry"]
+    assert detail_json["contents"]["focus_graph"]["nodes"]

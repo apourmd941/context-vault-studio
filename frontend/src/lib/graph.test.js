@@ -71,9 +71,9 @@ describe("graph helpers", () => {
     const options = buildGraphFocusOptions(graph);
 
     expect(options.typeOptions.map((item) => [item.id, item.count])).toEqual([
-      ["source", 1],
       ["markdown-note", 2],
       ["other-file", 1],
+      ["source", 1],
     ]);
     expect(options.folderOptions.map((item) => [item.label, item.count])).toEqual([
       ["data", 1],

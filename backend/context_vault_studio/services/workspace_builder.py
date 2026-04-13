@@ -9,14 +9,18 @@ import re
 import shutil
 import threading
 import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from copy import deepcopy
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
-from context_vault_studio.services.worker_policy import clamp_worker_count, reserve_worker_budget
+from context_vault_studio.services.worker_policy import (
+    clamp_worker_count,
+    get_worker_budget_state,
+    reserve_worker_budget,
+)
 from context_vault_studio.storage import load_file_analysis_cache, save_file_analysis_cache
 
 
@@ -346,6 +350,13 @@ def extract_edges(
     return edges
 
 
+def extract_edges_batch(records: list[FileRecord], source_files: list[FileRecord]) -> list[dict[str, str]]:
+    edges: list[dict[str, str]] = []
+    for record in records:
+        edges.extend(extract_edges(record, source_files))
+    return edges
+
+
 def copy_or_link(source_file: Path, dest_file: Path, mode: str) -> None:
     dest_file.parent.mkdir(parents=True, exist_ok=True)
     if mode == "symlink":
@@ -412,6 +423,32 @@ def build_file_record_with_cache(
         summary=summary,
         content_hash=content_hash,
     )
+
+
+def chunk_candidates(candidates: list[FileCandidate], worker_count: int) -> list[list[FileCandidate]]:
+    if not candidates:
+        return []
+    target_chunk_size = max(192, min(1024, len(candidates) // max(worker_count * 3, 1) or 1))
+    return [candidates[index:index + target_chunk_size] for index in range(0, len(candidates), target_chunk_size)]
+
+
+def chunk_records(records: list[FileRecord], worker_count: int) -> list[list[FileRecord]]:
+    if not records:
+        return []
+    target_chunk_size = max(96, min(512, len(records) // max(worker_count * 2, 1) or 1))
+    return [records[index:index + target_chunk_size] for index in range(0, len(records), target_chunk_size)]
+
+
+def build_file_record_batch(
+    candidates: list[FileCandidate],
+    analysis_cache: dict[str, dict],
+) -> tuple[list[FileRecord], dict[str, dict]]:
+    cache_updates: dict[str, dict] = {}
+    records = [
+        build_file_record_with_cache(candidate, analysis_cache, cache_updates, None)
+        for candidate in candidates
+    ]
+    return records, cache_updates
 
 
 def scan_source(
@@ -531,27 +568,67 @@ def scan_source(
 
     if not candidates:
         if progress_callback:
-            progress_callback({"message": f"Scanning {source_name}: no files matched", "fraction": 1.0})
+            progress_callback({
+                "message": f"Scanning {source_name}: no files matched",
+                "fraction": 1.0,
+                "telemetry": {
+                    **get_worker_budget_state(),
+                    "active_threads": 1,
+                    "active_processes": 0,
+                    "current_stage": "source-discovery",
+                },
+            })
         return records, skipped
 
     max_workers = min(clamp_worker_count(worker_count), len(candidates))
     cache_source = analysis_cache or {}
     cache_target = cache_updates if cache_updates is not None else {}
-    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="context-vault-scan") as executor:
+    batches = chunk_candidates(candidates, max_workers)
+    if progress_callback:
+        progress_callback(
+            {
+                "message": f"Scanning {source_name}: processing {len(candidates)} files across {len(batches)} chunks",
+                "fraction": 0.15,
+                "telemetry": {
+                    **get_worker_budget_state(),
+                    "active_threads": 1,
+                    "active_processes": max_workers,
+                    "current_stage": "file-analysis",
+                },
+            }
+        )
+
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
         future_map = {
-            executor.submit(build_file_record_with_cache, candidate, cache_source, cache_target, cache_lock): candidate.rel_path
-            for candidate in candidates
+            executor.submit(
+                build_file_record_batch,
+                batch,
+                {candidate.original_path: cache_source.get(candidate.original_path) for candidate in batch if candidate.original_path in cache_source},
+            ): len(batch)
+            for batch in batches
         }
         completed = 0
         total = len(candidates)
         for future in as_completed(future_map):
-            records.append(future.result())
-            completed += 1
+            batch_records, batch_updates = future.result()
+            records.extend(batch_records)
+            completed += future_map[future]
+            if cache_lock is not None:
+                with cache_lock:
+                    cache_target.update(batch_updates)
+            else:
+                cache_target.update(batch_updates)
             if progress_callback and (completed == total or completed % 200 == 0):
                 progress_callback(
                     {
                         "message": f"Scanning {source_name}: analyzed {completed}/{total} files",
                         "fraction": 0.15 + (completed / total) * 0.85,
+                        "telemetry": {
+                            **get_worker_budget_state(),
+                            "active_threads": 1,
+                            "active_processes": max_workers,
+                            "current_stage": "file-analysis",
+                        },
                     }
                 )
 
@@ -929,7 +1006,18 @@ def build_workspace_from_config(
         maps_dir.mkdir(parents=True, exist_ok=True)
         graph_dir.mkdir(parents=True, exist_ok=True)
     if progress_callback:
-        progress_callback({"progress": 6, "message": "Workspace initialized"})
+        progress_callback(
+            {
+                "progress": 6,
+                "message": "Workspace initialized",
+                "telemetry": {
+                    **get_worker_budget_state(),
+                    "active_threads": 0,
+                    "active_processes": 0,
+                    "current_stage": "workspace-init",
+                },
+            }
+        )
 
     all_records: list[FileRecord] = []
     all_skipped: list[SkippedRecord] = []
@@ -946,6 +1034,14 @@ def build_workspace_from_config(
     source_progress_lock = threading.Lock()
     source_progress_fractions = [0.0] * len(source_specs)
 
+    def telemetry_snapshot(*, active_threads: int, active_processes: int, current_stage: str) -> dict:
+        return {
+            **get_worker_budget_state(),
+            "active_threads": active_threads,
+            "active_processes": active_processes,
+            "current_stage": current_stage,
+        }
+
     def update_source_progress(source_index: int, source_name: str, detail: dict) -> None:
         if not progress_callback:
             return
@@ -957,12 +1053,25 @@ def build_workspace_from_config(
             {
                 "progress": 10 + int(aggregate_fraction * 55),
                 "message": detail.get("message", f"Scanning {source_name}"),
+                "telemetry": detail.get("telemetry"),
             }
         )
 
-    def process_source(source_index: int, source: dict, assigned_workers: int) -> dict:
+    def process_source(source_index: int, source: dict, assigned_workers: int, source_thread_count: int) -> dict:
         source_name = source["name"]
-        update_source_progress(source_index, source_name, {"fraction": 0.0, "message": f"Scanning {source_name}"})
+        update_source_progress(
+            source_index,
+            source_name,
+            {
+                "fraction": 0.0,
+                "message": f"Scanning {source_name}",
+                "telemetry": telemetry_snapshot(
+                    active_threads=source_thread_count,
+                    active_processes=0,
+                    current_stage="source-discovery",
+                ),
+            },
+        )
         records, skipped = scan_source(
             source,
             defaults,
@@ -973,9 +1082,61 @@ def build_workspace_from_config(
             progress_callback=lambda detail: update_source_progress(source_index, source_name, detail),
         )
         link_edges: list[dict[str, str]] = []
-        for record in records:
-            link_edges.extend(extract_edges(record, records))
-        update_source_progress(source_index, source_name, {"fraction": 1.0, "message": f"Indexed {source_name}"})
+        edge_workers = min(max(1, assigned_workers), len(records))
+        edge_batches = chunk_records(records, edge_workers)
+        update_source_progress(
+            source_index,
+            source_name,
+            {
+                "fraction": 0.95,
+                "message": f"Scanning {source_name}: linking graph edges",
+                "telemetry": telemetry_snapshot(
+                    active_threads=source_thread_count,
+                    active_processes=edge_workers,
+                    current_stage="edge-linking",
+                ),
+            },
+        )
+        if len(edge_batches) <= 1:
+            for record in records:
+                link_edges.extend(extract_edges(record, records))
+        else:
+            with ProcessPoolExecutor(max_workers=edge_workers) as executor:
+                future_map = {
+                    executor.submit(extract_edges_batch, batch, records): len(batch)
+                    for batch in edge_batches
+                }
+                linked = 0
+                total = len(records)
+                for future in as_completed(future_map):
+                    link_edges.extend(future.result())
+                    linked += future_map[future]
+                    update_source_progress(
+                        source_index,
+                        source_name,
+                        {
+                            "fraction": 0.95 + (linked / max(total, 1)) * 0.05,
+                            "message": f"Scanning {source_name}: linked edges for {linked}/{total} records",
+                            "telemetry": telemetry_snapshot(
+                                active_threads=source_thread_count,
+                                active_processes=edge_workers,
+                                current_stage="edge-linking",
+                            ),
+                        },
+                    )
+        update_source_progress(
+            source_index,
+            source_name,
+            {
+                "fraction": 1.0,
+                "message": f"Indexed {source_name}",
+                "telemetry": telemetry_snapshot(
+                    active_threads=source_thread_count,
+                    active_processes=0,
+                    current_stage="source-complete",
+                ),
+            },
+        )
         return {
             "source_index": source_index,
             "source": source,
@@ -993,24 +1154,19 @@ def build_workspace_from_config(
     with reserve_worker_budget(worker_count, profile=worker_profile) as reserved_workers:
         source_workers, per_source_workers = source_execution_plan(reserved_workers, len(source_specs))
         source_results: list[dict] = []
-
-        if len(source_specs) == 1 or source_workers == 1:
-            assigned_workers = per_source_workers[0] if per_source_workers else reserved_workers
-            for source_index, source in enumerate(source_specs):
-                source_results.append(process_source(source_index, source, assigned_workers))
-        else:
-            with ThreadPoolExecutor(max_workers=source_workers, thread_name_prefix="context-vault-source") as executor:
-                future_map = {
-                    executor.submit(
-                        process_source,
-                        source_index,
-                        source,
-                        per_source_workers[source_index % len(per_source_workers)],
-                    ): source_index
-                    for source_index, source in enumerate(source_specs)
-                }
-                for future in as_completed(future_map):
-                    source_results.append(future.result())
+        with ThreadPoolExecutor(max_workers=source_workers, thread_name_prefix="context-vault-source") as executor:
+            future_map = {
+                executor.submit(
+                    process_source,
+                    source_index,
+                    source,
+                    per_source_workers[source_index % len(per_source_workers)],
+                    source_workers,
+                ): source_index
+                for source_index, source in enumerate(source_specs)
+            }
+            for future in as_completed(future_map):
+                source_results.append(future.result())
 
     for result in sorted(source_results, key=lambda item: item["source_index"]):
         source = result["source"]
@@ -1091,12 +1247,36 @@ def build_workspace_from_config(
 
         if parallel_output and output_tasks:
             with reserve_worker_budget(None, profile=worker_profile) as output_workers:
+                if progress_callback:
+                    progress_callback(
+                        {
+                            "progress": 88,
+                            "message": "Writing vault files in parallel",
+                            "telemetry": telemetry_snapshot(
+                                active_threads=min(output_workers, len(output_tasks)),
+                                active_processes=0,
+                                current_stage="parallel-output",
+                            ),
+                        }
+                    )
                 with ThreadPoolExecutor(
                     max_workers=min(output_workers, len(output_tasks)),
                     thread_name_prefix="context-vault-output",
                 ) as executor:
                     list(executor.map(lambda item: copy_or_link(item[0], item[1], item[2]), output_tasks))
         else:
+            if progress_callback:
+                progress_callback(
+                    {
+                        "progress": 88,
+                        "message": "Writing vault files",
+                        "telemetry": telemetry_snapshot(
+                            active_threads=1,
+                            active_processes=0,
+                            current_stage="output",
+                        ),
+                    }
+                )
             for source_file, dest_file, mode in output_tasks:
                 copy_or_link(source_file, dest_file, mode)
 
