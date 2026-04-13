@@ -19,6 +19,7 @@ The repo now includes:
 - explain bundles
 - unified history timeline
 - compact frontend artifact panel for the v2 backend surfaces
+- true WebGL graph renderer with indexed-node search and render-cap controls
 - Playwright smoke-test scaffold
 - Electron desktop scaffold
 
@@ -31,6 +32,7 @@ The repo now includes:
 - [x] guided demo dry-run succeeds
 - [x] docs reflect the guided demo and simplified UI
 - [x] docs reflect the v2 backend surfaces through Phase 21
+- [x] docs reflect the WebGL graph migration and large-graph behavior
 - [x] skip-CI push convention is documented in practice for this repo history
 - [x] browser smoke scaffold runs locally against the live app
 - [x] desktop packaging scaffold can produce an unpacked local app bundle
@@ -42,6 +44,7 @@ The repo now includes:
 - [ ] more polished screenshots and walkthrough assets
 - [ ] frontend surfaces for the new v2 backend artifacts
 - [ ] stronger production UX around Build, Logic, Explain, and history views
+- [ ] deeper bundle-size optimization for the lazy-loaded WebGL graph chunk
 
 ## Local Verification Commands
 

@@ -22,6 +22,18 @@ http://127.0.0.1:12046
 4. open `Graph` or `Notes`
 5. if you want the generated vault on disk, click `Build vault`
 
+## Graph controls
+
+In `Graph`, the current renderer is a true WebGL 3D scene.
+
+- left-drag or trackpad drag to orbit
+- right-drag to pan
+- mouse wheel or pinch to zoom
+- click a node to focus it and sync the notes pane selection
+- drag a node to pin it in space
+- right-click a pinned node to release it
+- use `Find node` to search the full indexed graph, even when the scene is render-capped
+
 ## New v2 artifact tools
 
 The `V2 studio` panel exposes the newer backend capabilities:
@@ -66,6 +78,7 @@ That produces an unpacked app bundle for local inspection, not a signed release.
 ## What is real now
 
 - guided demo and simplified UI flow
+- true WebGL graph view with large-graph render caps and indexed-node search
 - reusable snapshot bundles
 - deterministic no-model Build planning
 - scratch patch previews

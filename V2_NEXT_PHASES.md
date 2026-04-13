@@ -20,6 +20,7 @@ The current app already has:
 - preview and build
 - access boundary rules
 - Obsidian-style graph output
+- a true WebGL 3D graph scene with search and render-cap behavior for large workspaces
 - notes, canvas, bookmarks, snapshots
 - guided demo onboarding
 - background preview/build jobs

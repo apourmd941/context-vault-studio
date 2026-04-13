@@ -220,16 +220,25 @@ Turn the earlier Obsidian-style mapping prototype into a real shareable app with
 - added a Playwright smoke scaffold
 - added a lightweight Electron desktop scaffold
 
+## Phase 23
+
+- replaced the earlier SVG-style graph surface with a true WebGL 3D renderer
+- added graph orbit, pan, zoom, node focus, drag-to-pin, and release interactions
+- kept large workspaces responsive by making rendered-node caps explicit while preserving full indexed-node search
+- lazy-loaded the WebGL graph tab so the rest of the app still opens on a lighter main bundle
+- updated operator-facing docs to describe the WebGL graph behavior and verification surface
+
 ## Verification
 
 - `python3 -m py_compile` for the shared builder
 - `python3 tools/build_context_workspace.py --config config/neutron_curated.example.json --dry-run`
 - backend tests
 - frontend production build
+- frontend unit tests after the WebGL graph migration
 
 ## Next Good Expansions
 
 - import and export multiple named workspace presets from the UI
-- graph visualization beyond counts and summaries
+- clustered and semantic graph views layered on top of the WebGL renderer
 - richer source-type helpers for repos, manuals, and research folders
 - packaged release workflows for easier sharing outside a dev terminal

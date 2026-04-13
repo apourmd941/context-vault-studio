@@ -5,7 +5,7 @@
 - macOS
 - Linux
 - Windows
-- Chrome or Chromium-based browsers
+- Chrome or Chromium-based browsers with WebGL enabled
 
 ## Core Runtime
 
@@ -35,6 +35,10 @@ Core packages include:
 Frontend dependencies are managed in:
 
 - `frontend/package.json`
+
+Notable frontend packages include:
+
+- `react-force-graph-3d` for the true WebGL graph surface
 
 Install with:
 
@@ -92,6 +96,7 @@ npm --prefix frontend run build
 - access-controlled path inspection
 - async preview and build jobs
 - explorer and quick switcher
+- WebGL graph view with orbit, pan, zoom, node focus, and indexed-node search
 - markdown, image, and PDF preview
 - text note editing and note creation
 - bookmarks and snapshots

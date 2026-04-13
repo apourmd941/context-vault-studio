@@ -1,9 +1,8 @@
-import { startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
 
 import BookmarkPanel from "./BookmarkPanel";
 import CanvasBoard from "./CanvasBoard";
 import ExplorerPane from "./ExplorerPane";
-import GraphMap from "./GraphMap";
 import {
   applyPatchPreview,
   compareHistorySnapshots,
@@ -37,6 +36,9 @@ import PreviewPane from "./PreviewPane";
 import QuickSwitcher from "./QuickSwitcher";
 import SnapshotPanel from "./SnapshotPanel";
 import { buildAdjacency, buildFileTree, searchFiles } from "./lib/vault";
+
+
+const GraphMap = lazy(() => import("./GraphMap"));
 
 
 const EMPTY_ACCESS = {
@@ -2070,15 +2072,24 @@ export default function App() {
                     Open selected notes
                   </button>
                 </div>
-                <GraphMap
-                  graph={activeResult?.graph}
-                  onSelectNode={(node) => {
-                    const file = fileLookup.get(node.id);
-                    if (file) {
-                      selectFile(file);
-                    }
-                  }}
-                />
+                <Suspense
+                  fallback={(
+                    <div className="graph-empty">
+                      <h3>Loading WebGL graph</h3>
+                      <p>The 3D graph engine is loading for this workspace view.</p>
+                    </div>
+                  )}
+                >
+                  <GraphMap
+                    graph={activeResult?.graph}
+                    onSelectNode={(node) => {
+                      const file = fileLookup.get(node.id);
+                      if (file) {
+                        selectFile(file);
+                      }
+                    }}
+                  />
+                </Suspense>
               </section>
             ) : (
               <EmptyTabState

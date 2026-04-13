@@ -20,7 +20,7 @@ Build a cross-platform local app that lets people:
 - preview the match set before building
 - generate an Obsidian-friendly vault for human navigation
 - export graph and manifest artifacts for machine retrieval
-- render an Obsidian-style graph map inside the UI
+- render an Obsidian-style WebGL graph map inside the UI
 - enforce allow and block rules before any source is inspected or built
 - share the tool with others without tying it to one repo layout
 
@@ -61,6 +61,8 @@ Build a cross-platform local app that lets people:
   - canvas boards
   - preview/build job tracking
   - graph view
+  - graph search across indexed nodes
+  - render-cap control for large graph scenes
   - path inspection
 - API endpoints:
   - `GET /api/bootstrap`
@@ -130,6 +132,7 @@ Build a cross-platform local app that lets people:
 ## Operator Notes
 
 - The UI is intentionally Obsidian-inspired, not a literal clone.
+- The graph surface now uses a true WebGL renderer; keep large workspaces responsive by making render caps and full-index search explicit in the UI.
 - The bundled guided demo should remain portable and must not depend on Aidin-only absolute paths.
 - Keep the first-run flow simple: the operator should be able to load the demo, preview, and reach Notes or Graph without editing low-level settings first.
 - Keep the app shareable: avoid hard-wiring it to Aidin-only paths except in optional local example configs.

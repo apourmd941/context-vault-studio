@@ -1,10 +1,13 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
+import ForceGraph3D from "react-force-graph-3d";
+
+import { graphNodeLabel, searchGraphNodes, selectVisibleGraph } from "./lib/graph";
 import { localGraph } from "./lib/vault";
 
 
-const WIDTH = 1080;
-const HEIGHT = 620;
+const DEFAULT_GRAPH_SIZE = { width: 960, height: 620 };
+const DEFAULT_NODE_CAP = 1200;
 
 
 function clamp(value, min, max) {
@@ -12,14 +15,15 @@ function clamp(value, min, max) {
 }
 
 
-function nodeLabel(node) {
-  return node.name || node.label || node.rel_path || node.id;
-}
-
-
-function nodeAccent(node) {
-  if (node.type === "source") {
+function nodeAccent(node, selectedNodeId, highlightNodeIds) {
+  if (node.id === selectedNodeId) {
+    return "#eef1ff";
+  }
+  if (highlightNodeIds.has(node.id)) {
     return "#7ce6d3";
+  }
+  if (node.type === "source") {
+    return "#5ecdbc";
   }
   if ((node.extension || "").toLowerCase() === ".md") {
     return "#9b8cff";
@@ -28,149 +32,61 @@ function nodeAccent(node) {
 }
 
 
-function buildLayout(graph, sourceFilter, maxNodes) {
-  if (!graph?.nodes?.length) {
-    return { nodes: [], edges: [], totalNodes: 0 };
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+
+function buildNodeTooltip(node) {
+  const label = escapeHtml(graphNodeLabel(node));
+  const path = node.rel_path || node.path || "";
+  const source = node.source || node.name || "";
+  return [
+    `<div><strong>${label}</strong></div>`,
+    path ? `<div>${escapeHtml(path)}</div>` : "",
+    source ? `<div>${escapeHtml(source)}</div>` : "",
+  ]
+    .filter(Boolean)
+    .join("");
+}
+
+
+function focusNode(graphRef, node, transitionMs = 900) {
+  if (!graphRef.current || node?.x == null || node?.y == null || node?.z == null) {
+    return;
   }
 
-  let nodes = graph.nodes;
-  if (sourceFilter !== "all") {
-    nodes = nodes.filter((node) => {
-      if (node.type === "source") {
-        return node.name === sourceFilter;
-      }
-      return node.source === sourceFilter;
-    });
-  }
+  const distance = node.type === "source" ? 280 : 170;
+  const length = Math.hypot(node.x, node.y, node.z) || 1;
+  const ratio = 1 + distance / length;
 
-  const visibleIds = new Set(nodes.map((node) => node.id));
-  let edges = (graph.edges || []).filter((edge) => visibleIds.has(edge.from) && visibleIds.has(edge.to));
-
-  const degrees = new Map(nodes.map((node) => [node.id, 0]));
-  for (const edge of edges) {
-    degrees.set(edge.from, (degrees.get(edge.from) || 0) + 1);
-    degrees.set(edge.to, (degrees.get(edge.to) || 0) + 1);
-  }
-
-  const sourceNodes = nodes
-    .filter((node) => node.type === "source")
-    .sort((a, b) => nodeLabel(a).localeCompare(nodeLabel(b)));
-  const fileNodes = nodes
-    .filter((node) => node.type !== "source")
-    .sort((a, b) => (degrees.get(b.id) || 0) - (degrees.get(a.id) || 0) || nodeLabel(a).localeCompare(nodeLabel(b)));
-
-  const cappedNodes = [...sourceNodes, ...fileNodes].slice(0, Math.max(18, Math.min(maxNodes, nodes.length)));
-  const cappedIds = new Set(cappedNodes.map((node) => node.id));
-  edges = edges.filter((edge) => cappedIds.has(edge.from) && cappedIds.has(edge.to));
-
-  const finalDegrees = new Map(cappedNodes.map((node) => [node.id, 0]));
-  for (const edge of edges) {
-    finalDegrees.set(edge.from, (finalDegrees.get(edge.from) || 0) + 1);
-    finalDegrees.set(edge.to, (finalDegrees.get(edge.to) || 0) + 1);
-  }
-
-  const seededNodes = cappedNodes.map((node, index) => {
-    const angle = (index / Math.max(cappedNodes.length, 1)) * Math.PI * 2;
-    const radius = 90 + (index / Math.max(cappedNodes.length, 1)) * Math.min(WIDTH, HEIGHT) * 0.34;
-    return {
-      ...node,
-      degree: finalDegrees.get(node.id) || 0,
-      x: WIDTH / 2 + Math.cos(angle) * radius,
-      y: HEIGHT / 2 + Math.sin(angle) * radius,
-      vx: 0,
-      vy: 0,
-    };
-  });
-
-  const nodeIndex = new Map(seededNodes.map((node, index) => [node.id, index]));
-  const iterations = 140;
-  const repulsion = 9200;
-  const spring = 0.016;
-  const preferredDistance = 94;
-  const centerPull = 0.0055;
-  const damping = 0.82;
-
-  for (let step = 0; step < iterations; step += 1) {
-    const forces = seededNodes.map(() => ({ x: 0, y: 0 }));
-
-    for (let i = 0; i < seededNodes.length; i += 1) {
-      for (let j = i + 1; j < seededNodes.length; j += 1) {
-        const first = seededNodes[i];
-        const second = seededNodes[j];
-        let dx = second.x - first.x;
-        let dy = second.y - first.y;
-        let distanceSquared = dx * dx + dy * dy;
-        if (distanceSquared < 1) {
-          distanceSquared = 1;
-          dx = 1;
-          dy = 0;
-        }
-        const distance = Math.sqrt(distanceSquared);
-        const force = repulsion / distanceSquared;
-        const fx = (dx / distance) * force;
-        const fy = (dy / distance) * force;
-        forces[i].x -= fx;
-        forces[i].y -= fy;
-        forces[j].x += fx;
-        forces[j].y += fy;
-      }
-    }
-
-    for (const edge of edges) {
-      const fromIndex = nodeIndex.get(edge.from);
-      const toIndex = nodeIndex.get(edge.to);
-      if (fromIndex == null || toIndex == null) {
-        continue;
-      }
-      const fromNode = seededNodes[fromIndex];
-      const toNode = seededNodes[toIndex];
-      const dx = toNode.x - fromNode.x;
-      const dy = toNode.y - fromNode.y;
-      const distance = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
-      const force = (distance - preferredDistance) * spring;
-      const fx = (dx / distance) * force;
-      const fy = (dy / distance) * force;
-      forces[fromIndex].x += fx;
-      forces[fromIndex].y += fy;
-      forces[toIndex].x -= fx;
-      forces[toIndex].y -= fy;
-    }
-
-    for (let index = 0; index < seededNodes.length; index += 1) {
-      const node = seededNodes[index];
-      const centerX = WIDTH / 2 - node.x;
-      const centerY = HEIGHT / 2 - node.y;
-      forces[index].x += centerX * centerPull;
-      forces[index].y += centerY * centerPull;
-
-      node.vx = (node.vx + forces[index].x) * damping;
-      node.vy = (node.vy + forces[index].y) * damping;
-      node.x = clamp(node.x + node.vx, 34, WIDTH - 34);
-      node.y = clamp(node.y + node.vy, 34, HEIGHT - 34);
-    }
-  }
-
-  return { nodes: seededNodes, edges, totalNodes: nodes.length };
+  graphRef.current.cameraPosition(
+    {
+      x: node.x * ratio,
+      y: node.y * ratio,
+      z: node.z * ratio,
+    },
+    { x: node.x, y: node.y, z: node.z },
+    transitionMs,
+  );
 }
 
 
 export default function GraphMap({ graph, onSelectNode }) {
   const deferredGraph = useDeferredValue(graph);
+  const graphRef = useRef();
+  const canvasShellRef = useRef(null);
   const [sourceFilter, setSourceFilter] = useState("all");
-  const [maxNodes, setMaxNodes] = useState(180);
+  const [maxNodes, setMaxNodes] = useState(DEFAULT_NODE_CAP);
   const [localDepth, setLocalDepth] = useState(0);
-  const [layout, setLayout] = useState({ nodes: [], edges: [], totalNodes: 0 });
   const [selectedNodeId, setSelectedNodeId] = useState("");
-  const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
-  const [draggingNodeId, setDraggingNodeId] = useState("");
-  const [pinnedNodeIds, setPinnedNodeIds] = useState(() => new Set());
-  const [dragState, setDragState] = useState(null);
-  const canvasRef = useRef(null);
-
-  const sourceOptions = (deferredGraph?.nodes || [])
-    .filter((node) => node.type === "source")
-    .map((node) => node.name)
-    .sort((a, b) => a.localeCompare(b));
+  const [searchQuery, setSearchQuery] = useState("");
+  const [graphSize, setGraphSize] = useState(DEFAULT_GRAPH_SIZE);
 
   const filteredGraph = useMemo(() => {
     if (!deferredGraph?.nodes?.length) {
@@ -182,103 +98,144 @@ export default function GraphMap({ graph, onSelectNode }) {
     return localGraph(deferredGraph, selectedNodeId, localDepth);
   }, [deferredGraph, localDepth, selectedNodeId]);
 
-  useEffect(() => {
-    setLayout(buildLayout(filteredGraph, sourceFilter, maxNodes));
-  }, [filteredGraph, sourceFilter, maxNodes]);
+  const visibleGraph = useMemo(
+    () => selectVisibleGraph(filteredGraph, { sourceFilter, maxNodes, selectedNodeId }),
+    [filteredGraph, maxNodes, selectedNodeId, sourceFilter],
+  );
+
+  const sourceOptions = (deferredGraph?.nodes || [])
+    .filter((node) => node.type === "source")
+    .map((node) => node.name)
+    .sort((a, b) => a.localeCompare(b));
+
+  const searchResults = useMemo(() => searchGraphNodes(deferredGraph, searchQuery, 6), [deferredGraph, searchQuery]);
+
+  const selectedNode = visibleGraph.nodes.find((node) => node.id === selectedNodeId) || null;
+
+  const highlightNodeIds = useMemo(() => {
+    if (!selectedNodeId) {
+      return new Set();
+    }
+    const next = new Set([selectedNodeId]);
+    for (const edge of visibleGraph.edges) {
+      if (edge.from === selectedNodeId) {
+        next.add(edge.to);
+      }
+      if (edge.to === selectedNodeId) {
+        next.add(edge.from);
+      }
+    }
+    return next;
+  }, [selectedNodeId, visibleGraph.edges]);
+
+  const graphData = useMemo(
+    () => ({
+      nodes: visibleGraph.nodes.map((node) => ({ ...node })),
+      links: visibleGraph.edges.map((edge) => ({
+        ...edge,
+        source: edge.from,
+        target: edge.to,
+      })),
+    }),
+    [visibleGraph],
+  );
+
+  const hiddenNodeCount = Math.max(visibleGraph.totalNodes - visibleGraph.nodes.length, 0);
+  const nodeCapMax = Math.max(40, visibleGraph.totalNodes || 40);
+  const nodeCapStep = nodeCapMax > 3000 ? 100 : nodeCapMax > 1200 ? 50 : 10;
 
   useEffect(() => {
-    if (!layout.nodes.length) {
+    if (!visibleGraph.nodes.length) {
       setSelectedNodeId("");
       return;
     }
-    if (!layout.nodes.some((node) => node.id === selectedNodeId)) {
-      const firstSource = layout.nodes.find((node) => node.type === "source");
-      setSelectedNodeId(firstSource?.id || layout.nodes[0].id);
+    if (!visibleGraph.nodes.some((node) => node.id === selectedNodeId)) {
+      const firstSource = visibleGraph.nodes.find((node) => node.type === "source");
+      setSelectedNodeId(firstSource?.id || visibleGraph.nodes[0].id);
     }
-  }, [layout, selectedNodeId]);
+  }, [selectedNodeId, visibleGraph.nodes]);
 
-  const selectedNode = layout.nodes.find((node) => node.id === selectedNodeId) || null;
+  useEffect(() => {
+    const shell = canvasShellRef.current;
+    if (!shell) {
+      return undefined;
+    }
 
-  function handleWheel(event) {
-    event.preventDefault();
-    const delta = event.deltaY < 0 ? 0.1 : -0.1;
-    setViewport((current) => ({
-      ...current,
-      scale: clamp(Number((current.scale + delta).toFixed(2)), 0.45, 2.4),
-    }));
-  }
+    function updateSize() {
+      const width = Math.max(Math.floor(shell.clientWidth || DEFAULT_GRAPH_SIZE.width), 320);
+      const height = clamp(Math.floor(width * 0.62), 420, 760);
+      setGraphSize({ width, height });
+    }
 
-  function handleCanvasPointerDown(event) {
-    if (event.target !== canvasRef.current) {
+    updateSize();
+
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateSize);
+      return () => window.removeEventListener("resize", updateSize);
+    }
+
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(shell);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const graphInstance = graphRef.current;
+    if (!graphInstance) {
       return;
     }
-    setDragState({
-      kind: "canvas",
-      startX: event.clientX,
-      startY: event.clientY,
-      originX: viewport.x,
-      originY: viewport.y,
-    });
-  }
 
-  function handleNodePointerDown(event, nodeId) {
-    event.stopPropagation();
-    setDraggingNodeId(nodeId);
-  }
+    const chargeForce = graphInstance.d3Force("charge");
+    chargeForce?.strength?.(visibleGraph.nodes.length > 2400 ? -28 : -54);
 
-  function handlePointerMove(event) {
-    if (dragState?.kind === "canvas") {
-      const dx = event.clientX - dragState.startX;
-      const dy = event.clientY - dragState.startY;
-      setViewport((current) => ({
-        ...current,
-        x: dragState.originX + dx,
-        y: dragState.originY + dy,
-      }));
+    const linkForce = graphInstance.d3Force("link");
+    linkForce?.distance?.((link) => (link.type === "links_to" ? 86 : 32));
+    linkForce?.strength?.((link) => (link.type === "links_to" ? 0.3 : 0.12));
+
+    const controls = graphInstance.controls?.();
+    if (controls) {
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.12;
+      controls.minDistance = 60;
+      controls.maxDistance = 6000;
+      controls.rotateSpeed = 0.85;
+      controls.zoomSpeed = 0.9;
+      controls.panSpeed = 0.6;
+    }
+  }, [visibleGraph.edges.length, visibleGraph.nodes.length]);
+
+  useEffect(() => {
+    if (!selectedNodeId || !graphRef.current) {
+      return undefined;
     }
 
-    if (!draggingNodeId) {
-      return;
-    }
-    const svg = canvasRef.current;
-    if (!svg) {
-      return;
-    }
-    const bounds = svg.getBoundingClientRect();
-    const localX = ((event.clientX - bounds.left) / bounds.width) * WIDTH;
-    const localY = ((event.clientY - bounds.top) / bounds.height) * HEIGHT;
-    setLayout((current) => ({
-      ...current,
-      nodes: current.nodes.map((node) =>
-        node.id === draggingNodeId
-          ? {
-              ...node,
-              x: clamp(localX / viewport.scale - viewport.x / viewport.scale, 30, WIDTH - 30),
-              y: clamp(localY / viewport.scale - viewport.y / viewport.scale, 30, HEIGHT - 30),
-            }
-          : node,
-      ),
-    }));
-  }
-
-  function handlePointerUp() {
-    if (draggingNodeId) {
-      setPinnedNodeIds((current) => new Set(current).add(draggingNodeId));
-    }
-    setDraggingNodeId("");
-    setDragState(null);
-  }
-
-  function togglePinned(nodeId) {
-    setPinnedNodeIds((current) => {
-      const next = new Set(current);
-      if (next.has(nodeId)) {
-        next.delete(nodeId);
-      } else {
-        next.add(nodeId);
+    let attempts = 0;
+    const timer = window.setInterval(() => {
+      attempts += 1;
+      const node = graphData.nodes.find((item) => item.id === selectedNodeId);
+      if (node?.x != null && node?.y != null && node?.z != null) {
+        focusNode(graphRef, node, attempts === 1 ? 700 : 360);
+        window.clearInterval(timer);
+      } else if (attempts >= 10) {
+        window.clearInterval(timer);
       }
-      return next;
-    });
+    }, 160);
+
+    return () => window.clearInterval(timer);
+  }, [graphData, selectedNodeId]);
+
+  function handleNodeSelect(node) {
+    setSelectedNodeId(node.id);
+    onSelectNode?.(node);
+    focusNode(graphRef, node, 850);
+  }
+
+  function handleSearchSelect(node) {
+    setSelectedNodeId(node.id);
+    setSourceFilter(node.type === "source" ? node.name : node.source || "all");
+    setSearchQuery(graphNodeLabel(node));
+    setMaxNodes((current) => Math.max(current, Math.min(DEFAULT_NODE_CAP, nodeCapMax)));
+    onSelectNode?.(node);
   }
 
   if (!deferredGraph?.nodes?.length) {
@@ -309,14 +266,24 @@ export default function GraphMap({ graph, onSelectNode }) {
           <input
             type="range"
             min="40"
-            max="320"
-            step="10"
-            value={maxNodes}
+            max={nodeCapMax}
+            step={nodeCapStep}
+            value={Math.min(maxNodes, nodeCapMax)}
             onChange={(event) => setMaxNodes(Number(event.target.value))}
           />
           <div className="microcopy">
-            Showing {layout.nodes.length} of {layout.totalNodes} nodes
+            Rendering {visibleGraph.nodes.length} of {visibleGraph.totalNodes} nodes
           </div>
+          {hiddenNodeCount > 0 ? (
+            <>
+              <div className="microcopy">The remaining {hiddenNodeCount} stay indexed and searchable.</div>
+              <div className="graph-toolbar__actions">
+                <button className="ghost-button" type="button" onClick={() => setMaxNodes(visibleGraph.totalNodes)}>
+                  Render all filtered nodes
+                </button>
+              </div>
+            </>
+          ) : null}
         </label>
         <label>
           <span>Local graph depth</span>
@@ -330,100 +297,128 @@ export default function GraphMap({ graph, onSelectNode }) {
           />
           <div className="microcopy">{localDepth === 0 ? "Whole graph" : `${localDepth} hops around selected node`}</div>
         </label>
+        <label className="graph-toolbar__search">
+          <span>Find node</span>
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="README.md or docs/spec"
+          />
+          <div className="microcopy">Search all indexed files, even when the scene is only rendering a sample.</div>
+          {searchQuery.trim() ? (
+            <div className="graph-search-results">
+              {searchResults.length ? (
+                searchResults.map((node) => (
+                  <button
+                    key={node.id}
+                    className="graph-search-result"
+                    type="button"
+                    onClick={() => handleSearchSelect(node)}
+                  >
+                    <strong>{graphNodeLabel(node)}</strong>
+                    <span>{node.rel_path || node.path || "Source node"}</span>
+                    <em>{node.source || node.name || node.type}</em>
+                  </button>
+                ))
+              ) : (
+                <p className="graph-search-empty">No indexed node matches that search yet.</p>
+              )}
+            </div>
+          ) : null}
+        </label>
+      </div>
+
+      <div className="graph-toolbar graph-toolbar--secondary">
         <div className="graph-legend">
           <span><i className="legend-dot legend-dot--source" /> source</span>
           <span><i className="legend-dot legend-dot--note" /> markdown note</span>
           <span><i className="legend-dot legend-dot--file" /> other file</span>
         </div>
+        <div className="graph-hint">
+          True WebGL view: left-drag to orbit, right-drag to pan, wheel to zoom. Drag a node to pin it in place, and right-click a pinned node to release it.
+        </div>
       </div>
 
       <div className="graph-grid">
-        <div className="graph-canvas-shell">
-          <svg
-            ref={canvasRef}
-            className="graph-canvas"
-            viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-            role="img"
-            aria-label="Vault graph"
-            onWheel={handleWheel}
-            onPointerDown={handleCanvasPointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
-            onPointerLeave={handlePointerUp}
-          >
-            <defs>
-              <filter id="graphGlow">
-                <feGaussianBlur stdDeviation="8" result="blur" />
-                <feMerge>
-                  <feMergeNode in="blur" />
-                  <feMergeNode in="SourceGraphic" />
-                </feMerge>
-              </filter>
-            </defs>
-
-            <g transform={`translate(${viewport.x} ${viewport.y}) scale(${viewport.scale})`}>
-            {layout.edges.map((edge) => {
-              const fromNode = layout.nodes.find((node) => node.id === edge.from);
-              const toNode = layout.nodes.find((node) => node.id === edge.to);
-              if (!fromNode || !toNode) {
-                return null;
+        <div ref={canvasShellRef} className="graph-canvas-shell graph-canvas-shell--webgl">
+          <ForceGraph3D
+            ref={graphRef}
+            graphData={graphData}
+            width={graphSize.width}
+            height={graphSize.height}
+            backgroundColor="#0b0f15"
+            showNavInfo={false}
+            nodeId="id"
+            linkSource="source"
+            linkTarget="target"
+            numDimensions={3}
+            enableNodeDrag
+            enableNavigationControls
+            nodeRelSize={3.4}
+            nodeVal={(node) => {
+              if (node.id === selectedNodeId) {
+                return 7.4;
               }
-              const isActive = edge.from === selectedNodeId || edge.to === selectedNodeId;
-              return (
-                <line
-                  key={`${edge.type}-${edge.from}-${edge.to}`}
-                  x1={fromNode.x}
-                  y1={fromNode.y}
-                  x2={toNode.x}
-                  y2={toNode.y}
-                  className={`graph-edge ${isActive ? "graph-edge--active" : ""}`}
-                />
-              );
-            })}
-
-            {layout.nodes.map((node) => {
-              const active = node.id === selectedNodeId;
-              const radius = node.type === "source" ? 10 : 5.5 + Math.min(node.degree, 5);
-              const accent = nodeAccent(node);
-              const pinned = pinnedNodeIds.has(node.id);
-              return (
-                <g
-                  key={node.id}
-                  className={`graph-node ${active ? "graph-node--active" : ""} ${pinned ? "graph-node--pinned" : ""}`}
-                  onClick={() => {
-                    setSelectedNodeId(node.id);
-                    onSelectNode?.(node);
-                  }}
-                  onDoubleClick={() => togglePinned(node.id)}
-                  onPointerDown={(event) => handleNodePointerDown(event, node.id)}
-                >
-                  <circle
-                    cx={node.x}
-                    cy={node.y}
-                    r={radius + (active ? 4 : 0)}
-                    fill={accent}
-                    fillOpacity={active ? 0.22 : 0.14}
-                    filter="url(#graphGlow)"
-                  />
-                  <circle cx={node.x} cy={node.y} r={radius} fill={accent} />
-                  {(active || node.type === "source") ? (
-                    <text x={node.x + radius + 8} y={node.y + 4} className="graph-label">
-                      {pinned ? `• ${nodeLabel(node)}` : nodeLabel(node)}
-                    </text>
-                  ) : null}
-                  <title>{nodeLabel(node)}</title>
-                </g>
-              );
-            })}
-            </g>
-          </svg>
+              if (node.type === "source") {
+                return 5.8;
+              }
+              if (highlightNodeIds.has(node.id)) {
+                return 4.6;
+              }
+              return 2.5 + Math.min(node.degree || 0, 4) * 0.35;
+            }}
+            nodeColor={(node) => nodeAccent(node, selectedNodeId, highlightNodeIds)}
+            nodeOpacity={0.92}
+            nodeResolution={10}
+            nodeLabel={buildNodeTooltip}
+            linkWidth={(link) => {
+              const active = link.source?.id === selectedNodeId || link.target?.id === selectedNodeId || link.source === selectedNodeId || link.target === selectedNodeId;
+              if (active) {
+                return link.type === "links_to" ? 1.6 : 2.2;
+              }
+              return link.type === "links_to" ? 0.4 : 0.8;
+            }}
+            linkOpacity={0.22}
+            linkColor={(link) => {
+              const active = link.source?.id === selectedNodeId || link.target?.id === selectedNodeId || link.source === selectedNodeId || link.target === selectedNodeId;
+              if (active) {
+                return "#7ce6d3";
+              }
+              return link.type === "links_to" ? "rgba(155, 140, 255, 0.42)" : "rgba(190, 196, 224, 0.26)";
+            }}
+            linkDirectionalParticles={(link) => {
+              const active = link.source?.id === selectedNodeId || link.target?.id === selectedNodeId || link.source === selectedNodeId || link.target === selectedNodeId;
+              return active ? 2 : 0;
+            }}
+            linkDirectionalParticleWidth={1.6}
+            linkDirectionalParticleSpeed={() => 0.006}
+            warmupTicks={60}
+            cooldownTicks={visibleGraph.nodes.length > 2400 ? 60 : 110}
+            d3AlphaDecay={visibleGraph.nodes.length > 2400 ? 0.08 : 0.045}
+            d3VelocityDecay={0.26}
+            onNodeClick={handleNodeSelect}
+            onNodeDragEnd={(node) => {
+              node.fx = node.x;
+              node.fy = node.y;
+              node.fz = node.z;
+            }}
+            onNodeRightClick={(node) => {
+              delete node.fx;
+              delete node.fy;
+              delete node.fz;
+              graphRef.current?.d3ReheatSimulation();
+            }}
+            onBackgroundClick={() => graphRef.current?.zoomToFit(700, 80)}
+            showPointerCursor
+          />
         </div>
 
         <aside className="graph-details">
           {selectedNode ? (
             <>
               <span className="eyebrow">Selected node</span>
-              <h3>{nodeLabel(selectedNode)}</h3>
+              <h3>{graphNodeLabel(selectedNode)}</h3>
               <div className="graph-detail-list">
                 <div>
                   <span>Type</span>
@@ -440,6 +435,16 @@ export default function GraphMap({ graph, onSelectNode }) {
                 <div>
                   <span>Degree</span>
                   <strong>{selectedNode.degree}</strong>
+                </div>
+                <div>
+                  <span>Pinned</span>
+                  <strong>{selectedNode.fx != null || selectedNode.fy != null || selectedNode.fz != null ? "Yes" : "No"}</strong>
+                </div>
+                <div>
+                  <span>Visible now</span>
+                  <strong>
+                    {visibleGraph.nodes.length} / {visibleGraph.totalNodes}
+                  </strong>
                 </div>
               </div>
               {selectedNode.summary ? <p className="graph-summary">{selectedNode.summary}</p> : null}

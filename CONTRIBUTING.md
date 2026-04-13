@@ -33,10 +33,11 @@ npm --prefix frontend run build
 - Preserve cross-platform behavior.
 - Add or update tests when changing backend behavior, graph logic, search helpers, or access policy handling.
 - Document any operator-visible workflow changes in `README.md`, `AGENTS.md`, or `REQUIREMENTS.md` as needed.
+- For graph work, keep the distinction between indexed nodes and rendered nodes explicit, especially for large WebGL scenes.
 
 ## Good First Areas
 
-- graph interaction improvements
+- graph interaction improvements and WebGL performance polish
 - search and preview polish
 - import and export workflows
 - accessibility improvements

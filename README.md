@@ -7,7 +7,7 @@ Instead of pointing Claude or Codex at a giant parent folder, you define a tight
 ## Stack
 
 - Backend: FastAPI
-- Frontend: React 18 + Vite
+- Frontend: React 18 + Vite + `react-force-graph-3d`
 - Runtime: Python virtualenv + npm
 - Startup: shared localhost app-port registry
 
@@ -28,7 +28,7 @@ Instead of pointing Claude or Codex at a giant parent folder, you define a tight
 - builds an Obsidian-friendly vault with home and map notes
 - exports `context_graph.json` and `manifest.json`
 - persists reusable snapshot bundles with manifest, edge, cluster, policy, and architecture artifacts
-- renders an Obsidian-style local graph in the UI
+- renders an Obsidian-style local graph in the UI through a true WebGL 3D view
 - exposes formal Build adapter contracts and capability metadata for future governed Build work
 - can now assemble governed task packets from snapshot bundles, policy bundles, and selected SLCS pieces
 - can now run those task packets through a common adapter runner, even before the adapters are fully configured
@@ -80,7 +80,10 @@ The app now opens with a simpler `Vault` home first.
 - `Canvas`
   - arrange note and text cards on a board
 - `Graph`
-  - inspect the current local graph and jump back into notes
+  - inspect the current local graph through a WebGL 3D scene
+  - orbit, pan, zoom, and drag nodes directly
+  - search indexed files even when only a render-capped subset is visible
+  - jump back into notes from selected nodes
 - current result also carries a reusable snapshot bundle for later Explain / Build-style workflows
 - the `V2 studio` panel now exposes Logic, Explain, Build, delta, apply, and history actions from the current workspace
 
@@ -100,6 +103,7 @@ This repo now includes a bundled guided demo that works without any Aidin-only p
 - sample content: `demo/sample_workspace`
 
 The guided demo is intentionally tiny so the first preview is immediate and the graph is easy to read.
+Larger real workspaces keep a render cap in the graph scene for responsiveness while still keeping all indexed nodes searchable.
 
 ## Run It
 
@@ -175,6 +179,9 @@ Important:
 - `Notes`: explorer, quick switcher, preview, editing, backlinks, outgoing links
 - `Canvas`: draggable board for linking important notes and files
 - `Graph`: interactive local graph for vault exploration
+  - WebGL 3D orbit/pan/zoom controls
+  - indexed-node search plus selected-node focus
+  - render-cap control for large workspaces
 - Sidebar utilities:
   - presets
   - bookmarks
