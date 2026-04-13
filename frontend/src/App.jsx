@@ -143,6 +143,26 @@ function normalizeSource(source = {}) {
 }
 
 
+function uniqueValues(values) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+
+function syncAccessWithFolders(config) {
+  const folderPaths = uniqueValues((config.sources ?? []).map((source) => source.path?.trim()).filter(Boolean));
+  return {
+    ...config,
+    access: {
+      ...EMPTY_ACCESS,
+      ...(config.access ?? {}),
+      allowed_roots: folderPaths,
+      blocked_paths: [...(config.access?.blocked_paths ?? EMPTY_ACCESS.blocked_paths)],
+      blocked_patterns: [...(config.access?.blocked_patterns ?? EMPTY_ACCESS.blocked_patterns)],
+    },
+  };
+}
+
+
 function createEmptyConfig() {
   return {
     vault_name: "Context Vault Studio",
@@ -159,7 +179,7 @@ function createEmptyConfig() {
 
 function normalizeConfig(config = {}) {
   const base = createEmptyConfig();
-  return {
+  return syncAccessWithFolders({
     ...base,
     ...config,
     access: {
@@ -170,23 +190,24 @@ function normalizeConfig(config = {}) {
       blocked_patterns: [...(config.access?.blocked_patterns ?? EMPTY_ACCESS.blocked_patterns)],
     },
     sources: (config.sources ?? []).map(normalizeSource),
-  };
+  });
 }
 
 
 function serializeConfig(config) {
+  const syncedConfig = syncAccessWithFolders(config);
   return {
-    ...config,
-    output_dir: config.output_dir || createEmptyConfig().output_dir,
-    max_file_size_bytes: Number(config.max_file_size_bytes) || 1,
+    ...syncedConfig,
+    output_dir: syncedConfig.output_dir || createEmptyConfig().output_dir,
+    max_file_size_bytes: Number(syncedConfig.max_file_size_bytes) || 1,
     access: {
-      ...config.access,
-      allowed_roots: [...(config.access?.allowed_roots ?? [])],
-      blocked_paths: [...(config.access?.blocked_paths ?? [])],
-      blocked_patterns: [...(config.access?.blocked_patterns ?? [])],
-      enforce_copy_mode: Boolean(config.access?.enforce_copy_mode),
+      ...syncedConfig.access,
+      allowed_roots: [...(syncedConfig.access?.allowed_roots ?? [])],
+      blocked_paths: [...(syncedConfig.access?.blocked_paths ?? [])],
+      blocked_patterns: [...(syncedConfig.access?.blocked_patterns ?? [])],
+      enforce_copy_mode: Boolean(syncedConfig.access?.enforce_copy_mode),
     },
-    sources: config.sources.map((source) => ({
+    sources: syncedConfig.sources.map((source) => ({
       ...source,
       max_file_size_bytes:
         source.max_file_size_bytes === "" || source.max_file_size_bytes == null
@@ -1858,14 +1879,17 @@ export default function App() {
                     onOpenGraph={() => openStructureTab("graph")}
                   />
                 ) : (
-                  <EmptyTabState
-                    title="No workspace result yet"
-                    body="Load the guided demo from Templates or add a folder or disk, then preview to populate Structure."
-                    actions={[
-                      guidedDemo ? { label: "Load guided demo", onClick: () => handleLoadExample(guidedDemo, true), primary: true } : null,
-                      { label: "Run preview", onClick: () => startWorkspaceJob("preview") },
-                    ].filter(Boolean)}
-                  />
+                  <section className="panel panel--spotlight">
+                    <div className="panel__header">
+                      <div>
+                        <span className="eyebrow">Current result</span>
+                        <h3>No workspace result yet</h3>
+                      </div>
+                    </div>
+                    <p className="empty-copy">
+                      Load the guided demo from Templates or add a folder or disk, then use the top-right `Preview` button to populate Structure.
+                    </p>
+                  </section>
                 )}
                 <section className="panel">
                   <div className="panel__header panel__header--spread">
@@ -2004,6 +2028,9 @@ export default function App() {
                       />
                     </label>
                   </div>
+                  <p className="microcopy">
+                    Every folder or disk you add in Setup is automatically treated as an allowed root. Use exclusions here to define the sandbox boundary.
+                  </p>
                   <label className="checkbox-field">
                     <input
                       type="checkbox"
