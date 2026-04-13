@@ -41,6 +41,23 @@ Instead of pointing Claude or Codex at a giant parent folder, you define a tight
 - now exposes a persisted Logic profile with import, symbol, route, and storage-touch signals built in parallel
 - can now generate explain bundles from snapshot + logic context and pass them into governed Build task packets
 - now exposes a unified history timeline plus direct comparison between snapshot bundles
+
+## V2 Backend Surfaces
+
+The backend now also includes the first v2 governance and analysis layers:
+
+- snapshot bundles
+- build adapter contracts
+- governed Build task packets
+- deterministic no-model Build mode
+- scratch patch previews
+- scratch apply and reconciliation runs
+- parallel scan profiling
+- delta snapshots
+- live monitor polling and flush batches
+- logic profiles
+- explain bundles
+- unified history timeline
 - supports explorer, quick switcher, note preview, backlinks, and outgoing links
 - runs preview and build work as background jobs with persisted history
 - supports bookmarks, canvas boards, note editing, snapshots, and shareable export bundles
@@ -182,3 +199,5 @@ npm --prefix frontend install
 npm --prefix frontend test
 npm --prefix frontend run build
 ```
+
+See `RELEASE_READINESS.md` for the current release-hardening checklist.

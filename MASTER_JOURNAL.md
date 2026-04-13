@@ -211,6 +211,12 @@ Turn the earlier Obsidian-style mapping prototype into a real shareable app with
   - explain bundles
 - added direct snapshot-bundle comparison so changes can be inspected without manually diffing artifacts on disk
 
+## Phase 22
+
+- refreshed the README to reflect the much larger v2 backend surface
+- added a release-readiness checklist file for the current repo state
+- captured what is verified now versus what still belongs in later product hardening
+
 ## Verification
 
 - `python3 -m py_compile` for the shared builder

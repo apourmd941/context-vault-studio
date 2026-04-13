@@ -125,6 +125,7 @@ Build a cross-platform local app that lets people:
 - Backend lint: `ruff check backend scripts tools`
 - Frontend tests: `npm --prefix frontend test`
 - Frontend build: `npm --prefix frontend run build`
+- Release checklist: `RELEASE_READINESS.md`
 
 ## Operator Notes
 

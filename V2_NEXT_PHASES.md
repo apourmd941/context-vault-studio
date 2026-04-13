@@ -26,6 +26,11 @@ The current app already has:
 
 That means the next phases should build on the existing product instead of replacing it.
 
+Update:
+
+- Phases `9` through `22` in this document now have shipped first implementations in the repo.
+- The remaining future work is mostly about deeper polish, richer UI exposure, and stronger productionization rather than missing backend foundations.
+
 ## Core V2 Direction
 
 The v2 direction from the new notes is:
