@@ -661,6 +661,26 @@ function SourceSummaryList({ sourceSummaries }) {
 }
 
 
+function BlockedPathList({ blockedPaths, onRemove }) {
+  if (!blockedPaths.length) {
+    return <p className="empty-copy">No excluded folders or files yet.</p>;
+  }
+
+  return (
+    <div className="blocked-list">
+      {blockedPaths.map((pathValue, index) => (
+        <div key={`${pathValue}-${index}`} className="blocked-row">
+          <code>{pathValue}</code>
+          <button className="ghost-button" type="button" onClick={() => onRemove(index)}>
+            Remove
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+
 export default function App() {
   const [activeTab, setActiveTab] = useState("vault");
   const [mainTab, setMainTab] = useState("structure");
@@ -995,6 +1015,21 @@ export default function App() {
     patchConfig({ ...config, sources: config.sources.filter((_, sourceIndex) => sourceIndex !== index) });
   }
 
+  function addBlockedPath(pathValue) {
+    const nextBlocked = [...(config.access.blocked_paths ?? [])];
+    if (!nextBlocked.includes(pathValue)) {
+      nextBlocked.push(pathValue);
+    }
+    updateAccessField("blocked_paths", nextBlocked);
+  }
+
+  function removeBlockedPath(index) {
+    updateAccessField(
+      "blocked_paths",
+      (config.access.blocked_paths ?? []).filter((_, blockedIndex) => blockedIndex !== index),
+    );
+  }
+
   function toggleNode(nodeId) {
     setExpandedNodes((current) => {
       const next = new Set(current);
@@ -1071,6 +1106,19 @@ export default function App() {
           },
         ],
       });
+    } catch (browseError) {
+      setError(browseError.message);
+    }
+  }
+
+  async function handleAddBlockedByBrowse(kind = "directory") {
+    setError("");
+    try {
+      const payload = await chooseNativePath(kind);
+      if (!payload.path) {
+        return;
+      }
+      addBlockedPath(payload.path);
     } catch (browseError) {
       setError(browseError.message);
     }
@@ -1928,15 +1976,21 @@ export default function App() {
                         placeholder={"node_modules/**\ndist/**"}
                       />
                     </label>
-                    <label>
-                      <span>Blocked folders / files</span>
-                      <textarea
-                        rows="4"
-                        value={joinLines(config.access.blocked_paths)}
-                        onChange={(event) => updateAccessField("blocked_paths", splitLines(event.target.value))}
-                        placeholder={"../Private\n../../secrets"}
+                    <div className="field-grid__wide">
+                      <span className="field-label">Excluded folders / files</span>
+                      <div className="hero__actions hero__actions--tight">
+                        <button className="secondary-button" type="button" onClick={() => handleAddBlockedByBrowse("directory")}>
+                          Exclude folder / disk
+                        </button>
+                        <button className="secondary-button" type="button" onClick={() => handleAddBlockedByBrowse("file")}>
+                          Exclude file
+                        </button>
+                      </div>
+                      <BlockedPathList
+                        blockedPaths={config.access.blocked_paths ?? []}
+                        onRemove={removeBlockedPath}
                       />
-                    </label>
+                    </div>
                     <label>
                       <span>Blocked patterns</span>
                       <textarea
