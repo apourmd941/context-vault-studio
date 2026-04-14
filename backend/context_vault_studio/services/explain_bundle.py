@@ -5,10 +5,18 @@ import uuid
 from context_vault_studio.storage import save_explain_bundle
 
 
-def build_explain_bundle(snapshot_bundle: dict, logic_profile: dict | None = None) -> dict:
+def build_explain_bundle(
+    snapshot_bundle: dict,
+    logic_profile: dict | None = None,
+    *,
+    selected_files: list[str] | None = None,
+) -> dict:
     snapshot_contents = snapshot_bundle.get("contents") or {}
     manifest = snapshot_contents.get("file_manifest") or {}
     files = manifest.get("files") or []
+    selected = {item for item in (selected_files or []) if item}
+    if selected:
+        files = [item for item in files if item.get("rel_path") in selected]
     logic_contents = logic_profile.get("contents") if logic_profile else None
     if logic_contents is None and logic_profile:
         logic_contents = logic_profile.get("profile")
@@ -23,6 +31,8 @@ def build_explain_bundle(snapshot_bundle: dict, logic_profile: dict | None = Non
         for item in files[:10]
     ]
     logic_files = logic_contents.get("files") or []
+    if selected:
+        logic_files = [item for item in logic_files if item.get("rel_path") in selected]
     top_symbols = []
     for item in logic_files[:10]:
         for symbol in item.get("symbols", [])[:5]:
@@ -35,6 +45,7 @@ def build_explain_bundle(snapshot_bundle: dict, logic_profile: dict | None = Non
             "logic_profile_id": logic_profile.get("id") if logic_profile else None,
             "top_file_count": len(top_files),
             "top_symbol_count": len(top_symbols),
+            "selected_file_count": len(selected),
         },
         "architecture_summary": snapshot_contents.get("architecture_summary", ""),
         "top_files": top_files,
@@ -46,7 +57,7 @@ def build_explain_bundle(snapshot_bundle: dict, logic_profile: dict | None = Non
     record = save_explain_bundle(
         {
             "id": f"explain-bundle-{uuid.uuid4().hex[:8]}",
-            "label": f"Explain bundle for {snapshot_bundle.get('label')}",
+            "label": f"Explain bundle for {snapshot_bundle.get('label')}" + (" (scoped)" if selected else ""),
             "snapshot_bundle_id": snapshot_bundle.get("id"),
             "logic_profile_id": logic_profile.get("id") if logic_profile else None,
             "bundle": bundle,

@@ -38,10 +38,13 @@ def _analyze_file(file_entry: dict) -> dict:
     }
 
 
-def build_logic_profile(config: dict, *, max_workers: int = 8) -> dict:
+def build_logic_profile(config: dict, *, max_workers: int = 8, selected_files: list[str] | None = None) -> dict:
     started = perf_counter()
     result = build_workspace_from_config(config, base_dir=Path(REPO_ROOT), dry_run=True, clean=True)
     files = result.get("files", [])
+    selected = {item for item in (selected_files or []) if item}
+    if selected:
+        files = [item for item in files if item.get("rel_path") in selected]
 
     with reserve_worker_budget(max_workers) as worker_count:
         with ProcessPoolExecutor(max_workers=worker_count) as executor:
@@ -77,7 +80,7 @@ def build_logic_profile(config: dict, *, max_workers: int = 8) -> dict:
     record = save_logic_profile(
         {
             "id": f"logic-profile-{uuid.uuid4().hex[:8]}",
-            "label": f"{config.get('vault_name', 'Context Vault Studio')} logic profile",
+            "label": f"{config.get('vault_name', 'Context Vault Studio')} logic profile" + (" (scoped)" if selected else ""),
             "profile": profile,
         }
     )

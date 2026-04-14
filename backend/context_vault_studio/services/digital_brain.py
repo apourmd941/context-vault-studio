@@ -102,6 +102,115 @@ def list_digital_brain_source_adapter_contracts() -> list[dict]:
     ]
 
 
+def sync_policy_for_entry(entry: dict, settings: dict) -> str:
+    adapter_id = entry.get("adapter_id")
+    if adapter_id == "approved_workspace_files":
+        return settings.get("workspace_file_sync_policy", "metadata_then_focus")
+    if adapter_id == "internal_notes":
+        return settings.get("notes_sync_policy", "metadata_then_focus")
+    if adapter_id == "internal_chats":
+        return settings.get("chat_sync_policy", "planned")
+    if adapter_id == "recent_workspace_activity":
+        return settings.get("recent_activity_sync_policy", "ranking_only")
+    return "surface_only"
+
+
+def deeper_read_eligible(sync_policy: str) -> bool:
+    return sync_policy in {"metadata_then_focus", "always_deepen"}
+
+
+def priority_score_for_entry(entry: dict, settings: dict) -> int:
+    adapter_id = entry.get("adapter_id")
+    if adapter_id == "approved_workspace_files":
+        return 100
+    if adapter_id == "internal_notes":
+        return 76 if settings.get("include_notes", True) else 18
+    if adapter_id == "recent_workspace_activity":
+        return 64 if settings.get("prioritize_recent_files", True) else 26
+    if adapter_id == "internal_chats":
+        return 58 if settings.get("include_chats", True) else 12
+    return 20
+
+
+def attention_reason_for_entry(entry: dict, settings: dict) -> str:
+    adapter_id = entry.get("adapter_id")
+    if adapter_id == "approved_workspace_files":
+        return "Approved workspace files stay first because they define the governed Digital Brain boundary."
+    if adapter_id == "internal_notes":
+        if not settings.get("include_notes", True):
+            return "Notes are disabled, so they remain out of the active attention set."
+        return "Notes are treated as first-class cognitive objects and can deepen after the surface pass."
+    if adapter_id == "recent_workspace_activity":
+        if settings.get("prioritize_recent_files", True):
+            return "Recent activity stays high because recency is turned into an explicit attention signal."
+        return "Recent activity is retained only as a lightweight hint because recent-file priority is off."
+    if adapter_id == "internal_chats":
+        if not settings.get("include_chats", True):
+            return "Chat ingestion is reserved for later because chat inclusion is currently disabled."
+        return "Chats stay planned but visible so future connectors can join the same governed attention model."
+    return "This source class remains available inside the current governed index."
+
+
+def build_source_priority_summary(registry_entries: list[dict], settings: dict) -> list[dict]:
+    rows = []
+    for entry in registry_entries:
+        sync_policy = sync_policy_for_entry(entry, settings)
+        rows.append(
+            {
+                "source_id": entry.get("source_id"),
+                "adapter_id": entry.get("adapter_id"),
+                "label": entry.get("display_name"),
+                "source_type": entry.get("source_type"),
+                "status": entry.get("status"),
+                "sync_policy": sync_policy,
+                "deeper_read_eligible": deeper_read_eligible(sync_policy),
+                "priority_score": priority_score_for_entry(entry, settings),
+                "reason": attention_reason_for_entry(entry, settings),
+            }
+        )
+    return sorted(rows, key=lambda item: (-item["priority_score"], item["label"].lower()))
+
+
+def build_cognitive_view_recommendations(focus_graph: dict) -> list[dict]:
+    nodes = focus_graph.get("nodes", [])
+    topic_nodes = [node for node in nodes if node.get("type") == "topic"]
+    project_nodes = [node for node in nodes if node.get("type") == "project"]
+    memory_nodes = [node for node in nodes if node.get("type") == "memory"]
+
+    recommendations: list[dict] = []
+    for node in topic_nodes[:3]:
+        recommendations.append(
+            {
+                "view_id": f"topic:{slugify(node.get('label') or node.get('id') or 'topic')}",
+                "kind": "topic",
+                "label": f"Topic focus: {node.get('label')}",
+                "anchor_node_id": node.get("id"),
+                "description": f"Track the approved files and memories clustering around {node.get('label')}.",
+            }
+        )
+    for node in project_nodes[:2]:
+        recommendations.append(
+            {
+                "view_id": f"project:{slugify(node.get('label') or node.get('id') or 'project')}",
+                "kind": "project",
+                "label": f"Project focus: {node.get('label')}",
+                "anchor_node_id": node.get("id"),
+                "description": f"Keep one saved cognitive view anchored on {node.get('label')}.",
+            }
+        )
+    for node in memory_nodes[:2]:
+        recommendations.append(
+            {
+                "view_id": f"memory:{slugify(node.get('label') or node.get('id') or 'memory')}",
+                "kind": "memory",
+                "label": f"Memory follow-up: {node.get('label')}",
+                "anchor_node_id": node.get("id"),
+                "description": "Track promoted or candidate memory items beside the files they derive from.",
+            }
+        )
+    return recommendations
+
+
 def infer_object_type(file_entry: dict) -> str:
     extension = (file_entry.get("extension") or "").lower()
     if extension == ".md":
@@ -173,6 +282,10 @@ def build_surface_pass_cognitive_graph(
             "name": project_key,
             "summary": f"Approved Digital Brain project shell for {project_key}.",
             "path": project_key,
+            "confidence": 0.98,
+            "why_surfaced": [
+                f"{project_key} is an approved workspace source inside the current Digital Brain boundary."
+            ],
         }
         project_nodes.append(node)
         project_node_lookup[project_id] = node
@@ -221,6 +334,19 @@ def build_surface_pass_cognitive_graph(
         project_id = f"project:{slugify(source_name)}"
         file_id = source_object.get("external_id")
         node_type = source_object["object_type"]
+        why_surfaced = [
+            f"Surface score {score} inside approved source {source_name}.",
+        ]
+        if node_type == "note":
+            why_surfaced.append("Notes are prioritized as direct cognitive working material.")
+        elif node_type == "document":
+            why_surfaced.append("Documents rank highly because they usually carry durable context.")
+        if settings.get("prioritize_recent_files", True):
+            why_surfaced.append("Recent-file priority is enabled for this Digital Brain profile.")
+        if summary:
+            why_surfaced.append("A summary was available, so this object can surface with evidence text.")
+        if rel_path and rel_path.count("/") == 0:
+            why_surfaced.append("Top-level files are slightly favored during the surface pass.")
         file_nodes.append(
             {
                 "id": f"brain:{source_object['object_id']}",
@@ -234,6 +360,8 @@ def build_surface_pass_cognitive_graph(
                 "file_id": file_id,
                 "importance_score": score,
                 "project_id": project_id,
+                "confidence": min(0.97, 0.55 + score * 0.05),
+                "why_surfaced": why_surfaced,
             }
         )
 
@@ -254,6 +382,10 @@ def build_surface_pass_cognitive_graph(
                     "source": source_name,
                     "confidence": 0.55,
                     "status": "candidate",
+                    "why_surfaced": [
+                        "Decision-like language was detected in the source title or summary.",
+                        f"Candidate was derived from approved source {source_name}.",
+                    ],
                 }
             )
 
@@ -270,6 +402,11 @@ def build_surface_pass_cognitive_graph(
                 "source": "Digital Brain",
                 "topic_weight": count,
                 "examples": topic_examples.get(topic, [])[:4],
+                "confidence": min(0.95, 0.48 + count * 0.08),
+                "why_surfaced": [
+                    f"Derived from {count} approved objects during the surface pass.",
+                    "Topic clustering stays selective so the Focus view remains interpretable.",
+                ],
             }
         )
 
@@ -283,6 +420,8 @@ def build_surface_pass_cognitive_graph(
             "path": item["title"],
             "source": item["source"],
             "file_id": item["file_id"],
+            "confidence": item["confidence"],
+            "why_surfaced": item.get("why_surfaced", []),
         }
         for item in memory_shells[: density["memories"]]
     ]
@@ -334,6 +473,7 @@ def build_surface_pass_cognitive_graph(
             "project_count": len(project_nodes),
             "topic_count": len(topic_nodes),
             "memory_shell_count": len(memory_shells),
+            "view_recommendation_count": 0,
         },
         "nodes": nodes,
         "edges": edges,
@@ -542,6 +682,9 @@ def build_digital_brain_index_payload(config: dict, result: dict) -> dict:
     ]
 
     focus_graph, memory_shells = build_surface_pass_cognitive_graph(source_objects, content_units, brain_settings)
+    focus_graph["summary"]["view_recommendation_count"] = len(build_cognitive_view_recommendations(focus_graph))
+    source_priority = build_source_priority_summary(registry_entries, brain_settings)
+    cognitive_view_recommendations = build_cognitive_view_recommendations(focus_graph)
 
     index = {
         "summary": {
@@ -554,9 +697,12 @@ def build_digital_brain_index_payload(config: dict, result: dict) -> dict:
             "graph_edge_count": len(graph_edges),
             "memory_candidate_count": len(memory_shells),
             "memory_count": 0,
+            "source_priority_count": len(source_priority),
+            "cognitive_view_recommendation_count": len(cognitive_view_recommendations),
         },
         "settings": brain_settings,
         "source_registry": registry_entries,
+        "source_priority": source_priority,
         "adapter_contracts": list_digital_brain_source_adapter_contracts(),
         "source_objects": source_objects[:600],
         "episodes": episodes,
@@ -564,6 +710,7 @@ def build_digital_brain_index_payload(config: dict, result: dict) -> dict:
         "graph_nodes": graph_nodes[:600],
         "graph_edges": graph_edges[:1000],
         "focus_graph": focus_graph,
+        "cognitive_view_recommendations": cognitive_view_recommendations,
         "memory_shells": memory_shells[:120],
         "memory_candidates": memory_shells[:120],
         "memories": [],

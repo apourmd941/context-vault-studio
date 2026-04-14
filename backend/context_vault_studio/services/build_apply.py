@@ -104,6 +104,7 @@ def apply_build_patch_preview(preview: dict) -> dict:
     preview_dir = Path(preview["bundle_dir"])
     patch_bundle = (preview.get("contents") or {}).get("patch_bundle") or {}
     task_packet = (preview.get("contents") or {}).get("task_packet") or {}
+    task_metadata = task_packet.get("metadata") or {}
 
     changed_files = _apply_patch_bundle(preview_dir, patch_bundle, scratch_apply_dir, rollback_dir)
     after_result = _rescan_scratch_workspace(run_dir, scratch_apply_dir)
@@ -136,6 +137,10 @@ def apply_build_patch_preview(preview: dict) -> dict:
             "preview_id": preview_id,
             "scratch_apply_dir": str(scratch_apply_dir),
             "rollback_dir": str(rollback_dir),
+            "canvas_id": task_metadata.get("canvas_id"),
+            "canvas_label": task_metadata.get("canvas_label"),
+            "scope_label": task_metadata.get("scope_label"),
+            "selected_file_count": len((task_packet.get("scope") or {}).get("selected_files", [])),
             "reconciliation_report": reconciliation_report,
             "apply_summary": apply_summary,
         }

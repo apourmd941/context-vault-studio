@@ -109,8 +109,36 @@ export function fetchDigitalBrainIndex(indexId) {
   return request(`/api/digital-brain/indexes/${indexId}`);
 }
 
+export function fetchDigitalBrainRecords() {
+  return request("/api/digital-brain/records");
+}
+
+export function createDigitalBrainRecord(payload) {
+  return request("/api/digital-brain/records", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateDigitalBrainRecord(recordId, payload) {
+  return request(`/api/digital-brain/records/${recordId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteDigitalBrainRecord(recordId) {
+  return request(`/api/digital-brain/records/${recordId}`, {
+    method: "DELETE",
+  });
+}
+
 export function fetchCanvases() {
   return request("/api/canvases");
+}
+
+export function fetchCanvasTemplates() {
+  return request("/api/canvas-templates");
 }
 
 export function createCanvas(payload) {
@@ -130,6 +158,46 @@ export function updateCanvas(canvasId, payload) {
 export function deleteCanvas(canvasId) {
   return request(`/api/canvases/${canvasId}`, {
     method: "DELETE",
+  });
+}
+
+export function importCanvasBoard(path) {
+  return request("/api/canvases/import", {
+    method: "POST",
+    body: JSON.stringify({ path }),
+  });
+}
+
+export function createCanvasSnapshot(canvasId, payload) {
+  return request(`/api/canvases/${canvasId}/snapshot`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function createCanvasTemplate(payload) {
+  return request("/api/canvas-templates", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateCanvasTemplate(templateId, payload) {
+  return request(`/api/canvas-templates/${templateId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteCanvasTemplate(templateId) {
+  return request(`/api/canvas-templates/${templateId}`, {
+    method: "DELETE",
+  });
+}
+
+export function exportCanvasBoard(canvasId) {
+  return request(`/api/canvases/${canvasId}/export`, {
+    method: "POST",
   });
 }
 
@@ -199,19 +267,20 @@ export function chooseNativePath(kind = "directory") {
   });
 }
 
-export function createLogicProfile(config, maxWorkers = DEFAULT_WORKER_COUNT) {
+export function createLogicProfile(config, maxWorkers = DEFAULT_WORKER_COUNT, selectedFiles = []) {
   return request("/api/logic/profile", {
     method: "POST",
-    body: JSON.stringify({ config, max_workers: maxWorkers }),
+    body: JSON.stringify({ config, max_workers: maxWorkers, selected_files: selectedFiles }),
   });
 }
 
-export function createExplainBundle(snapshotBundleId, logicProfileId = null) {
+export function createExplainBundle(snapshotBundleId, logicProfileId = null, selectedFiles = []) {
   return request("/api/explain/bundles", {
     method: "POST",
     body: JSON.stringify({
       snapshot_bundle_id: snapshotBundleId,
       logic_profile_id: logicProfileId,
+      selected_files: selectedFiles,
     }),
   });
 }

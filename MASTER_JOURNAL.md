@@ -262,6 +262,40 @@ Turn the earlier Obsidian-style mapping prototype into a real shareable app with
 - attached that canonical index to preview and build results and exposed it through bootstrap and dedicated API endpoints
 - surfaced DB2 status in the Digital Brain setup flow so the lane now shows adapter contracts and canonical-index counts instead of only setup copy
 
+## Phase 26
+
+- finished the Canvas roadmap end to end for the current V1 scope
+- Canvas boards now carry explicit workflow metadata for:
+  - preferred lane
+  - template category
+  - tags
+  - build goal
+  - allowed targets
+  - forbidden paths
+  - review notes
+  - milestone labels
+- added stronger Canvas review and history behavior:
+  - scope health checks
+  - `why this scope` explanation
+  - current-board vs latest-snapshot change review
+  - board-linked activity for scopes, patch previews, and apply runs
+  - latest board-linked Build summary
+- made Canvas portable as a package instead of only bare board JSON:
+  - linked saved scopes export/import
+  - linked Digital Brain records export/import
+  - import validation
+  - rename-on-conflict handling
+  - versioned board package format
+- completed native Canvas to Digital Brain promotion coverage by adding:
+  - topic promotion
+  - task promotion
+  - board-linked Digital Brain review surfaces
+  - reopened board context from promoted records
+- added saved cognitive views and visible attention reasoning in Digital Brain so Canvas-created context can round-trip more cleanly into the cognitive lane
+- extended verification with:
+  - backend tests for portable board package import conflict handling
+  - frontend utility tests for Canvas metadata normalization and saved-scope comparison
+
 ## Verification
 
 - `python3 -m py_compile` for the shared builder

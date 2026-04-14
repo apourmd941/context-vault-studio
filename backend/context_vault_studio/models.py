@@ -44,11 +44,32 @@ class AccessPolicy(BaseModel):
     enforce_copy_mode: bool = True
 
 
+class GlobalExclusionSettings(BaseModel):
+    blocked_paths: list[str] = Field(default_factory=list)
+    blocked_patterns: list[str] = Field(
+        default_factory=lambda: [
+            ".DS_Store",
+            "Thumbs.db",
+            ".git/**",
+            ".pytest_cache/**",
+            ".ruff_cache/**",
+            ".venv/**",
+            ".vscode/**",
+            "__pycache__/**",
+            "node_modules/**",
+        ]
+    )
+
+
 class DigitalBrainSettings(BaseModel):
     scan_mode: Literal["quick_start", "project_priority", "broad_cognitive_index"] = "quick_start"
     graph_density: Literal["concise", "balanced", "rich"] = "balanced"
     enrichment_mode: Literal["background", "on_demand", "surface_only"] = "background"
     retention_mode: Literal["metadata_only", "extracted_text", "cached_content"] = "extracted_text"
+    workspace_file_sync_policy: Literal["surface_only", "metadata_then_focus", "always_deepen"] = "metadata_then_focus"
+    notes_sync_policy: Literal["disabled", "surface_only", "metadata_then_focus", "always_deepen"] = "metadata_then_focus"
+    chat_sync_policy: Literal["planned", "disabled", "metadata_then_focus"] = "planned"
+    recent_activity_sync_policy: Literal["disabled", "ranking_only", "metadata_then_focus"] = "ranking_only"
     prioritize_recent_files: bool = True
     include_notes: bool = True
     include_chats: bool = True
@@ -72,6 +93,7 @@ class WorkspaceConfig(BaseModel):
     default_exclude: list[str] = Field(default_factory=lambda: list(DEFAULT_EXCLUDE))
     default_include: list[str] = Field(default_factory=list)
     access: AccessPolicy = Field(default_factory=AccessPolicy)
+    global_exclusions: GlobalExclusionSettings = Field(default_factory=GlobalExclusionSettings)
     digital_brain: DigitalBrainSettings = Field(default_factory=DigitalBrainSettings)
     model_workflow: ModelWorkflowSettings = Field(default_factory=ModelWorkflowSettings)
     sources: list[SourceConfig] = Field(default_factory=list)
@@ -97,11 +119,12 @@ class PresetPayload(BaseModel):
 
 
 class BookmarkPayload(BaseModel):
-    type: Literal["file", "query", "graph", "canvas"] = "file"
+    type: Literal["file", "query", "graph", "canvas", "brain_view"] = "file"
     label: str = Field(..., min_length=1)
     path: str | None = None
     file_id: str | None = None
     query: str | None = None
+    metadata: dict = Field(default_factory=dict)
 
 
 class LayoutPayload(BaseModel):
@@ -133,16 +156,18 @@ class FileCreateRequest(BaseModel):
 
 class CanvasCard(BaseModel):
     id: str
-    type: Literal["file", "text"] = "file"
+    type: Literal["file", "text", "group"] = "file"
     label: str
     path: str | None = None
     file_id: str | None = None
     text: str = ""
+    note: str = ""
     x: float = 0
     y: float = 0
     width: float = 280
     height: float = 180
     color: str = "violet"
+    locked: bool = False
 
 
 class CanvasEdge(BaseModel):
@@ -150,6 +175,13 @@ class CanvasEdge(BaseModel):
     from_card: str
     to_card: str
     label: str = ""
+    color: str = "mint"
+
+
+class CanvasViewport(BaseModel):
+    x: float = 0
+    y: float = 0
+    zoom: float = 1
 
 
 class CanvasPayload(BaseModel):
@@ -157,6 +189,8 @@ class CanvasPayload(BaseModel):
     description: str = ""
     cards: list[CanvasCard] = Field(default_factory=list)
     edges: list[CanvasEdge] = Field(default_factory=list)
+    viewport: CanvasViewport = Field(default_factory=CanvasViewport)
+    metadata: dict = Field(default_factory=dict)
 
 
 class InspectPathRequest(BaseModel):
@@ -171,6 +205,32 @@ class FilePreviewRequest(BaseModel):
 
 class NativeDialogRequest(BaseModel):
     kind: Literal["directory", "file"] = "directory"
+
+
+class CanvasImportRequest(BaseModel):
+    path: str = Field(..., min_length=1)
+
+
+class CanvasSnapshotRequest(BaseModel):
+    label: str | None = None
+    snapshot_bundle_id: str | None = None
+    snapshot_bundle_label: str | None = None
+
+
+class DigitalBrainRecordPayload(BaseModel):
+    kind: Literal["memory", "decision", "topic", "task"]
+    title: str = Field(..., min_length=1)
+    summary: str = ""
+    selected_files: list[str] = Field(default_factory=list)
+    source_scope_label: str = ""
+    canvas_id: str | None = None
+    snapshot_bundle_id: str | None = None
+    snapshot_bundle_label: str | None = None
+    status: Literal["seed", "promoted"] = "promoted"
+    confidence: float = Field(default=0.72, ge=0, le=1)
+    review_status: Literal["new", "reviewed", "approved"] = "new"
+    provenance_notes: str = ""
+    metadata: dict = Field(default_factory=dict)
 
 
 class BuildTaskRequest(BaseModel):
@@ -204,11 +264,13 @@ class LiveMonitorRequest(BaseModel):
 class LogicProfileRequest(BaseModel):
     config: WorkspaceConfig
     max_workers: int = Field(default=DEFAULT_WORKER_COUNT, ge=1, le=ABSOLUTE_WORKER_CAP)
+    selected_files: list[str] = Field(default_factory=list)
 
 
 class ExplainBundleRequest(BaseModel):
     snapshot_bundle_id: str = Field(..., min_length=1)
     logic_profile_id: str | None = None
+    selected_files: list[str] = Field(default_factory=list)
 
 
 class HistoryCompareRequest(BaseModel):

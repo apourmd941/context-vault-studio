@@ -8,7 +8,11 @@ import {
   compareHistorySnapshots,
   createBookmark,
   createCanvas,
+  createCanvasSnapshot,
+  createCanvasTemplate,
+  createDigitalBrainRecord,
   createFile,
+  deleteCanvasTemplate,
   createJob,
   createDeltaSnapshot,
   createExplainBundle,
@@ -17,25 +21,34 @@ import {
   createParallelScanProfile,
   createPatchPreview,
   createPreset,
+  deleteCanvas,
   deletePreset,
+  deleteDigitalBrainRecord,
   exportBundle,
   fetchBootstrap,
   fetchBuildHistory,
+  fetchCanvasTemplates,
+  fetchDigitalBrainRecords,
   fetchDigitalBrainIndex,
   fetchFilePreview,
   fetchHistoryTimeline,
   fetchJob,
   inspectPath,
+  importCanvasBoard,
   restoreSnapshot,
   saveFile,
   saveLayout,
   saveWorkspaceConfig,
   updateCanvas,
+  updateCanvasTemplate,
+  updateDigitalBrainRecord,
+  exportCanvasBoard,
 } from "./api";
 import PresetPanel from "./PresetPanel";
 import PreviewPane from "./PreviewPane";
 import QuickSwitcher from "./QuickSwitcher";
 import SnapshotPanel from "./SnapshotPanel";
+import { buildSavedScopeComparison } from "./lib/canvas";
 import { buildAdjacency, buildFileTree, searchFiles } from "./lib/vault";
 import { DEFAULT_WORKER_COUNT, workerCountForProfile, workerProfileForLane } from "./lib/workerPolicy";
 
@@ -48,6 +61,33 @@ const EMPTY_ACCESS = {
   blocked_paths: [],
   blocked_patterns: [],
   enforce_copy_mode: true,
+};
+
+const DEFAULT_GLOBAL_BLOCK_PATTERNS = [
+  ".DS_Store",
+  "Thumbs.db",
+  ".git/**",
+  ".pytest_cache/**",
+  ".ruff_cache/**",
+  ".venv/**",
+  ".vscode/**",
+  "__pycache__/**",
+  "node_modules/**",
+];
+
+const RECOMMENDED_GLOBAL_BLOCK_PATTERNS = [
+  ...DEFAULT_GLOBAL_BLOCK_PATTERNS,
+  "dist/**",
+  "build/**",
+  ".next/**",
+  "coverage/**",
+  ".mypy_cache/**",
+  "*.log",
+];
+
+const EMPTY_GLOBAL_EXCLUSIONS = {
+  blocked_paths: [],
+  blocked_patterns: DEFAULT_GLOBAL_BLOCK_PATTERNS,
 };
 
 const EMPTY_SOURCE = {
@@ -65,6 +105,10 @@ const EMPTY_DIGITAL_BRAIN = {
   graph_density: "balanced",
   enrichment_mode: "background",
   retention_mode: "extracted_text",
+  workspace_file_sync_policy: "metadata_then_focus",
+  notes_sync_policy: "metadata_then_focus",
+  chat_sync_policy: "planned",
+  recent_activity_sync_policy: "ranking_only",
   prioritize_recent_files: true,
   include_notes: true,
   include_chats: true,
@@ -116,6 +160,16 @@ const DIGITAL_BRAIN_CATEGORY_OPTIONS = [
   { id: "topics", label: "Topics" },
   { id: "people", label: "People" },
   { id: "tasks", label: "Tasks" },
+];
+
+const NOTES_FILTERS = [
+  { id: "all", label: "All" },
+  { id: "docs", label: "Docs" },
+  { id: "markdown", label: "Markdown" },
+  { id: "code", label: "Code" },
+  { id: "binary", label: "Binary" },
+  { id: "recent", label: "Recent" },
+  { id: "bookmarked", label: "Bookmarked" },
 ];
 
 const MAIN_TABS = [
@@ -210,6 +264,136 @@ function uniqueValues(values) {
 }
 
 
+function buildScopedConfigFromFiles(baseConfig, files, selectedRelPaths) {
+  const scopedSelection = new Set((selectedRelPaths || []).filter(Boolean));
+  if (!scopedSelection.size) {
+    return serializeConfig(baseConfig);
+  }
+
+  const selectedBySource = new Map();
+  for (const file of files || []) {
+    if (!scopedSelection.has(file.rel_path) || !file.source_name) {
+      continue;
+    }
+    const bucket = selectedBySource.get(file.source_name) || [];
+    bucket.push(file.rel_path);
+    selectedBySource.set(file.source_name, bucket);
+  }
+
+  const scopedConfig = serializeConfig(baseConfig);
+  scopedConfig.sources = scopedConfig.sources
+    .filter((source) => selectedBySource.has(source.name))
+    .map((source) => ({
+      ...source,
+      include: uniqueValues(selectedBySource.get(source.name) || []),
+      exclude: [],
+    }));
+  return scopedConfig;
+}
+
+
+function createCanvasCardFromGraphNode(node, file, index = 0) {
+  if (file) {
+    return {
+      id: crypto.randomUUID(),
+      type: "file",
+      label: file.label,
+      path: file.original_path,
+      file_id: file.id,
+      text: file.summary || file.rel_path || "",
+      note: node.summary || "",
+      x: 140 + index * 22,
+      y: 140 + index * 18,
+      width: 340,
+      height: 220,
+      color: "violet",
+      locked: false,
+    };
+  }
+
+  const isGroupLike = node.type === "folder" || node.type === "source" || node.type === "project";
+  return {
+    id: crypto.randomUUID(),
+    type: isGroupLike ? "group" : "text",
+    label: node.label || node.name || node.rel_path || node.type,
+    text: isGroupLike ? "" : node.summary || node.rel_path || node.path || "",
+    note: isGroupLike ? `${node.summary || "Selected from graph"}\n${node.rel_path || node.path || ""}`.trim() : "",
+    x: 120 + index * 20,
+    y: 120 + index * 16,
+    width: isGroupLike ? 460 : 320,
+    height: isGroupLike ? 280 : 220,
+    color: isGroupLike ? "amber" : "mint",
+    locked: false,
+  };
+}
+
+
+function buildCanvasTemplate(templateId) {
+  const viewport = { x: 100, y: 80, zoom: 0.82 };
+  if (templateId === "architecture-review") {
+    return {
+      name: "Architecture review board",
+      description: "Organize core modules, risks, decisions, and open questions before deeper logic/explain work.",
+      viewport,
+      metadata: {
+        workflow: "architecture-review",
+        preferred_lane: "structure",
+        template_category: "architecture",
+        tags: ["architecture", "review", "risks"],
+        snapshot_label: "Architecture review milestone",
+      },
+      cards: [
+        { id: crypto.randomUUID(), type: "group", label: "Core modules", note: "Drop the most important files or folders here.", x: 80, y: 80, width: 520, height: 320, color: "amber", locked: false },
+        { id: crypto.randomUUID(), type: "group", label: "Risks", note: "Known fragility, missing tests, or unclear ownership.", x: 680, y: 80, width: 420, height: 260, color: "rose", locked: false },
+        { id: crypto.randomUUID(), type: "text", label: "Review goal", text: "What are we trying to understand about this system?", x: 120, y: 450, width: 320, height: 200, color: "mint", locked: false },
+        { id: crypto.randomUUID(), type: "text", label: "Open questions", text: "List assumptions, unresolved paths, and unknowns here.", x: 500, y: 440, width: 360, height: 220, color: "slate", locked: false },
+      ],
+      edges: [],
+    };
+  }
+  if (templateId === "build-plan") {
+    return {
+      name: "Build plan board",
+      description: "Shape scoped build targets, constraints, outputs, and validation steps before creating patch previews.",
+      viewport,
+      metadata: {
+        workflow: "build-plan",
+        preferred_lane: "structure",
+        template_category: "build",
+        tags: ["build", "validation", "targets"],
+        snapshot_label: "Build plan milestone",
+      },
+      cards: [
+        { id: crypto.randomUUID(), type: "group", label: "Target files", note: "Pin the files this build should touch.", x: 90, y: 90, width: 500, height: 300, color: "amber", locked: false },
+        { id: crypto.randomUUID(), type: "group", label: "Validation", note: "Tests, lint, and manual checks.", x: 700, y: 90, width: 420, height: 260, color: "mint", locked: false },
+        { id: crypto.randomUUID(), type: "text", label: "Build goal", text: "Describe the exact improvement this scoped build should produce.", x: 120, y: 430, width: 360, height: 220, color: "violet", locked: false },
+        { id: crypto.randomUUID(), type: "text", label: "Constraints", text: "Document what must not change.", x: 540, y: 430, width: 320, height: 220, color: "rose", locked: false },
+      ],
+      edges: [],
+    };
+  }
+  return {
+    name: "Research synthesis board",
+    description: "Group sources, findings, decisions, and next actions into one thinking board.",
+    viewport,
+    metadata: {
+      workflow: "research-synthesis",
+      preferred_lane: "digital-brain",
+      template_category: "research",
+      tags: ["research", "synthesis", "findings"],
+      snapshot_label: "Research synthesis milestone",
+    },
+    cards: [
+      { id: crypto.randomUUID(), type: "group", label: "Sources", note: "Collect notes, specs, manuals, and docs.", x: 80, y: 80, width: 460, height: 300, color: "amber", locked: false },
+      { id: crypto.randomUUID(), type: "group", label: "Findings", note: "Pull the strongest observations into one cluster.", x: 610, y: 80, width: 460, height: 300, color: "mint", locked: false },
+      { id: crypto.randomUUID(), type: "text", label: "Decisions", text: "Capture what we are actually choosing to do.", x: 140, y: 430, width: 340, height: 220, color: "violet", locked: false },
+      { id: crypto.randomUUID(), type: "text", label: "Next steps", text: "What should happen after this board is clear?", x: 560, y: 430, width: 320, height: 220, color: "slate", locked: false },
+    ],
+    edges: [],
+  };
+}
+
+
 function syncAccessWithFolders(config) {
   const folderPaths = uniqueValues((config.sources ?? []).map((source) => source.path?.trim()).filter(Boolean));
   return {
@@ -220,6 +404,12 @@ function syncAccessWithFolders(config) {
       allowed_roots: folderPaths,
       blocked_paths: [...(config.access?.blocked_paths ?? EMPTY_ACCESS.blocked_paths)],
       blocked_patterns: [...(config.access?.blocked_patterns ?? EMPTY_ACCESS.blocked_patterns)],
+    },
+    global_exclusions: {
+      ...EMPTY_GLOBAL_EXCLUSIONS,
+      ...(config.global_exclusions ?? {}),
+      blocked_paths: [...(config.global_exclusions?.blocked_paths ?? EMPTY_GLOBAL_EXCLUSIONS.blocked_paths)],
+      blocked_patterns: [...(config.global_exclusions?.blocked_patterns ?? EMPTY_GLOBAL_EXCLUSIONS.blocked_patterns)],
     },
     digital_brain: {
       ...EMPTY_DIGITAL_BRAIN,
@@ -262,6 +452,7 @@ function createEmptyConfig() {
     default_exclude: [],
     default_include: [],
     access: { ...EMPTY_ACCESS },
+    global_exclusions: { ...EMPTY_GLOBAL_EXCLUSIONS },
     digital_brain: { ...EMPTY_DIGITAL_BRAIN },
     model_workflow: { ...EMPTY_MODEL_WORKFLOW },
     sources: [],
@@ -280,6 +471,12 @@ function normalizeConfig(config = {}) {
       allowed_roots: [...(config.access?.allowed_roots ?? EMPTY_ACCESS.allowed_roots)],
       blocked_paths: [...(config.access?.blocked_paths ?? EMPTY_ACCESS.blocked_paths)],
       blocked_patterns: [...(config.access?.blocked_patterns ?? EMPTY_ACCESS.blocked_patterns)],
+    },
+    global_exclusions: {
+      ...EMPTY_GLOBAL_EXCLUSIONS,
+      ...(config.global_exclusions ?? {}),
+      blocked_paths: [...(config.global_exclusions?.blocked_paths ?? EMPTY_GLOBAL_EXCLUSIONS.blocked_paths)],
+      blocked_patterns: [...(config.global_exclusions?.blocked_patterns ?? EMPTY_GLOBAL_EXCLUSIONS.blocked_patterns)],
     },
     digital_brain: {
       ...EMPTY_DIGITAL_BRAIN,
@@ -307,6 +504,12 @@ function serializeConfig(config) {
       blocked_paths: [...(syncedConfig.access?.blocked_paths ?? [])],
       blocked_patterns: [...(syncedConfig.access?.blocked_patterns ?? [])],
       enforce_copy_mode: Boolean(syncedConfig.access?.enforce_copy_mode),
+    },
+    global_exclusions: {
+      ...EMPTY_GLOBAL_EXCLUSIONS,
+      ...(syncedConfig.global_exclusions ?? {}),
+      blocked_paths: [...(syncedConfig.global_exclusions?.blocked_paths ?? [])],
+      blocked_patterns: [...(syncedConfig.global_exclusions?.blocked_patterns ?? [])],
     },
     digital_brain: {
       ...EMPTY_DIGITAL_BRAIN,
@@ -831,9 +1034,9 @@ function SourceSummaryList({ sourceSummaries }) {
 }
 
 
-function BlockedPathList({ blockedPaths, onRemove }) {
+function BlockedPathList({ blockedPaths, onRemove, emptyCopy = "No excluded folders or files yet." }) {
   if (!blockedPaths.length) {
-    return <p className="empty-copy">No excluded folders or files yet.</p>;
+    return <p className="empty-copy">{emptyCopy}</p>;
   }
 
   return (
@@ -873,14 +1076,21 @@ export default function App() {
   const [logicProfiles, setLogicProfiles] = useState([]);
   const [explainBundles, setExplainBundles] = useState([]);
   const [digitalBrainIndexes, setDigitalBrainIndexes] = useState([]);
+  const [digitalBrainRecords, setDigitalBrainRecords] = useState([]);
   const [digitalBrainAdapterContracts, setDigitalBrainAdapterContracts] = useState([]);
   const [digitalBrainIndexDetail, setDigitalBrainIndexDetail] = useState(null);
   const [historyTimeline, setHistoryTimeline] = useState([]);
   const [historyComparison, setHistoryComparison] = useState(null);
+  const [scopeCompareLeftId, setScopeCompareLeftId] = useState("");
+  const [scopeCompareRightId, setScopeCompareRightId] = useState("");
+  const [selectedBrainRecordId, setSelectedBrainRecordId] = useState("");
+  const [selectedFocusNodeId, setSelectedFocusNodeId] = useState("");
   const [buildGoalDraft, setBuildGoalDraft] = useState("Generate a deterministic scoped improvement plan");
   const [buildPiecesDraft, setBuildPiecesDraft] = useState("docs_cleanup_piece");
+  const [activeBuildScope, setActiveBuildScope] = useState(null);
   const [logicWorkerProfile, setLogicWorkerProfile] = useState("default");
   const [canvases, setCanvases] = useState([]);
+  const [canvasTemplates, setCanvasTemplates] = useState([]);
   const [selectedCanvasId, setSelectedCanvasId] = useState("");
   const [jobs, setJobs] = useState([]);
   const [activeJobId, setActiveJobId] = useState("");
@@ -908,14 +1118,83 @@ export default function App() {
   const [expandedNodes, setExpandedNodes] = useState(() => new Set());
   const [quickOpen, setQuickOpen] = useState(false);
   const [quickQuery, setQuickQuery] = useState("");
+  const [notesFilter, setNotesFilter] = useState("all");
 
   const deferredSources = useDeferredValue(config.sources);
   const activeResult = buildResult ?? preview;
   const files = activeResult?.files ?? [];
-  const tree = useMemo(() => buildFileTree(files), [files]);
-  const searchResults = useMemo(() => searchFiles(files, quickQuery, 24), [files, quickQuery]);
+  const bookmarkPathSet = useMemo(
+    () => new Set((bookmarks ?? []).filter((item) => item.type === "file" && item.path).map((item) => item.path)),
+    [bookmarks],
+  );
+  const canvasScopeBookmarks = useMemo(
+    () => (bookmarks ?? []).filter((item) => item.type === "canvas"),
+    [bookmarks],
+  );
+  const digitalBrainViewBookmarks = useMemo(
+    () => (bookmarks ?? []).filter((item) => item.type === "brain_view"),
+    [bookmarks],
+  );
+  const digitalBrainMemorySeeds = useMemo(
+    () => (digitalBrainRecords ?? []).filter((item) => item.kind === "memory"),
+    [digitalBrainRecords],
+  );
+  const digitalBrainDecisionSeeds = useMemo(
+    () => (digitalBrainRecords ?? []).filter((item) => item.kind === "decision"),
+    [digitalBrainRecords],
+  );
+  const digitalBrainTopicSeeds = useMemo(
+    () => (digitalBrainRecords ?? []).filter((item) => item.kind === "topic"),
+    [digitalBrainRecords],
+  );
+  const digitalBrainTaskSeeds = useMemo(
+    () => (digitalBrainRecords ?? []).filter((item) => item.kind === "task"),
+    [digitalBrainRecords],
+  );
+  const digitalBrainWorkingSeeds = useMemo(
+    () => (digitalBrainRecords ?? []).filter((item) => item.kind !== "decision"),
+    [digitalBrainRecords],
+  );
+  const selectedBrainRecord =
+    digitalBrainRecords.find((item) => item.id === selectedBrainRecordId) || null;
+  const visibleFiles = useMemo(() => {
+    const noiseNames = new Set([".DS_Store", "Thumbs.db"]);
+    const filtered = files.filter((file) => !noiseNames.has(file.label));
+    if (notesFilter === "all") {
+      return filtered;
+    }
+    if (notesFilter === "docs") {
+      return filtered.filter((file) => [".md", ".pdf", ".txt"].includes((file.extension || "").toLowerCase()));
+    }
+    if (notesFilter === "markdown") {
+      return filtered.filter((file) => (file.extension || "").toLowerCase() === ".md");
+    }
+    if (notesFilter === "code") {
+      return filtered.filter((file) => [".py", ".js", ".ts", ".tsx", ".jsx", ".rs", ".go", ".java", ".sql"].includes((file.extension || "").toLowerCase()));
+    }
+    if (notesFilter === "binary") {
+      return filtered.filter((file) => !file.extension || ![".md", ".pdf", ".txt", ".py", ".js", ".ts", ".tsx", ".jsx", ".rs", ".go", ".java", ".sql", ".json", ".toml", ".yaml", ".yml", ".csv"].includes((file.extension || "").toLowerCase()));
+    }
+    if (notesFilter === "recent") {
+      return [...filtered].sort((left, right) => (right.modified_at || right.original_path || "").localeCompare(left.modified_at || left.original_path || "")).slice(0, 200);
+    }
+    if (notesFilter === "bookmarked") {
+      return filtered.filter((file) => bookmarkPathSet.has(file.original_path));
+    }
+    return filtered;
+  }, [bookmarkPathSet, files, notesFilter]);
+  const bookmarkFiles = useMemo(
+    () =>
+      (bookmarks ?? [])
+        .filter((item) => item.type === "file")
+        .map((item) => files.find((file) => file.original_path === item.path || file.id === item.file_id))
+        .filter(Boolean),
+    [bookmarks, files],
+  );
+  const tree = useMemo(() => buildFileTree(visibleFiles), [visibleFiles]);
+  const searchResults = useMemo(() => searchFiles(visibleFiles, quickQuery, 24), [quickQuery, visibleFiles]);
   const adjacency = useMemo(() => buildAdjacency(activeResult?.graph ?? { nodes: [], edges: [] }), [activeResult]);
-  const fileLookup = useMemo(() => new Map(files.map((file) => [file.id, file])), [files]);
+  const fileLookup = useMemo(() => new Map(visibleFiles.map((file) => [file.id, file])), [visibleFiles]);
   const guidedDemo = examples.find((example) => example.id === "guided-demo") || examples[0] || null;
   const latestJob = jobs[0] || null;
   const activeJob = activeJobId ? jobs.find((job) => job.id === activeJobId) || null : null;
@@ -926,6 +1205,8 @@ export default function App() {
   const digitalBrainContents = digitalBrainIndexDetail?.contents || {};
   const digitalBrainFocusGraph = digitalBrainContents.focus_graph || null;
   const digitalBrainMemoryShells = digitalBrainContents.memory_shells || [];
+  const digitalBrainSourcePriority = digitalBrainContents.source_priority || [];
+  const digitalBrainViewRecommendations = digitalBrainContents.cognitive_view_recommendations || [];
   const isExploreLane = mainTab === "structure" || mainTab === "digital-brain";
   const activeExploreLane = mainTab === "digital-brain" ? "digital-brain" : "structure";
   const activeExploreTab = mainTab === "digital-brain" ? digitalBrainTab : structureTab;
@@ -933,6 +1214,12 @@ export default function App() {
   const preferredExploreLane = isExploreLane ? activeExploreLane : "structure";
   const blockedRuleCount =
     (config.access?.blocked_paths?.length ?? 0) + (config.access?.blocked_patterns?.length ?? 0);
+  const globalBlockedRuleCount =
+    (config.global_exclusions?.blocked_paths?.length ?? 0) + (config.global_exclusions?.blocked_patterns?.length ?? 0);
+  const globalBlockedPatternSet = useMemo(
+    () => new Set(config.global_exclusions?.blocked_patterns ?? []),
+    [config.global_exclusions?.blocked_patterns],
+  );
   const decisionCandidates = useMemo(() => {
     const keywordRe = /\b(decision|decide|plan|summary|proposal|roadmap|next steps|conclusion)\b/i;
     return files
@@ -945,6 +1232,10 @@ export default function App() {
       .filter(Boolean)
       .slice(0, 12);
   }, [digitalBrainMemoryShells, fileLookup]);
+  const selectedFocusNode = useMemo(
+    () => (digitalBrainFocusGraph?.nodes || []).find((node) => node.id === selectedFocusNodeId) || null,
+    [digitalBrainFocusGraph?.nodes, selectedFocusNodeId],
+  );
 
   async function refreshV2Artifacts() {
     const [bootstrapPayload, timeline] = await Promise.all([fetchBootstrap(), fetchHistoryTimeline()]);
@@ -957,7 +1248,9 @@ export default function App() {
       setLogicProfiles(bootstrapPayload.logic_profiles ?? []);
       setExplainBundles(bootstrapPayload.explain_bundles ?? []);
       setDigitalBrainIndexes(bootstrapPayload.digital_brain_indexes ?? []);
+      setDigitalBrainRecords(bootstrapPayload.digital_brain_records ?? []);
       setDigitalBrainAdapterContracts(bootstrapPayload.digital_brain_adapter_contracts ?? []);
+      setCanvasTemplates(bootstrapPayload.canvas_templates ?? []);
       setHistoryTimeline(timeline ?? []);
     });
     return bootstrapPayload;
@@ -1026,8 +1319,10 @@ export default function App() {
           setLogicProfiles(payload.logic_profiles ?? []);
           setExplainBundles(payload.explain_bundles ?? []);
           setDigitalBrainIndexes(payload.digital_brain_indexes ?? []);
+          setDigitalBrainRecords(payload.digital_brain_records ?? []);
           setDigitalBrainAdapterContracts(payload.digital_brain_adapter_contracts ?? []);
           setCanvases(payload.canvases ?? []);
+          setCanvasTemplates(payload.canvas_templates ?? []);
           setSelectedCanvasId((payload.canvases ?? [])[0]?.id || "");
           setJobs(payload.jobs ?? []);
           setConfig(normalizeConfig(payload.config));
@@ -1061,7 +1356,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!files.length) {
+    if (!visibleFiles.length) {
       setSelectedFile(null);
       setFilePreview(null);
       return;
@@ -1076,9 +1371,14 @@ export default function App() {
     if (selectedFile && fileLookup.has(selectedFile.id)) {
       return;
     }
-    const preferred = files.find((file) => file.original_path === layout.selected_file_path);
-    setSelectedFile(preferred || files[0]);
-  }, [fileLookup, files, layout.selected_file_path, selectedFile, tree]);
+    const preferred = visibleFiles.find((file) => file.original_path === layout.selected_file_path);
+    const bestCandidate =
+      preferred ||
+      visibleFiles.find((file) => (file.extension || "").toLowerCase() === ".md") ||
+      visibleFiles.find((file) => [".txt", ".pdf", ".json", ".toml", ".yml", ".yaml"].includes((file.extension || "").toLowerCase())) ||
+      visibleFiles[0];
+    setSelectedFile(bestCandidate);
+  }, [fileLookup, layout.selected_file_path, selectedFile, tree, visibleFiles]);
 
   useEffect(() => {
     async function loadPreview() {
@@ -1116,6 +1416,18 @@ export default function App() {
 
     loadDigitalBrainDetail();
   }, [latestDigitalBrainIndex?.id]);
+
+  useEffect(() => {
+    const nodes = digitalBrainFocusGraph?.nodes || [];
+    if (!nodes.length) {
+      setSelectedFocusNodeId("");
+      return;
+    }
+    if (selectedFocusNodeId && nodes.some((node) => node.id === selectedFocusNodeId)) {
+      return;
+    }
+    setSelectedFocusNodeId(nodes[0].id);
+  }, [digitalBrainFocusGraph?.nodes, selectedFocusNodeId]);
 
   useEffect(() => {
     if (!activeJobId) {
@@ -1220,6 +1532,7 @@ export default function App() {
     setPreview(null);
     setBuildResult(null);
     setHistoryComparison(null);
+    setActiveBuildScope(null);
     setNotice("");
     setError("");
   }
@@ -1306,6 +1619,47 @@ export default function App() {
     updateAccessField(
       "blocked_paths",
       (config.access.blocked_paths ?? []).filter((_, blockedIndex) => blockedIndex !== index),
+    );
+  }
+
+  function updateGlobalExclusionsField(field, value) {
+    patchConfig({
+      ...config,
+      global_exclusions: {
+        ...config.global_exclusions,
+        [field]: value,
+      },
+    });
+  }
+
+  function toggleGlobalBlockedPattern(pattern) {
+    const current = [...(config.global_exclusions?.blocked_patterns ?? [])];
+    if (current.includes(pattern)) {
+      updateGlobalExclusionsField(
+        "blocked_patterns",
+        current.filter((value) => value !== pattern),
+      );
+      return;
+    }
+    updateGlobalExclusionsField("blocked_patterns", [...current, pattern]);
+  }
+
+  function restoreDefaultGlobalBlockedPatterns() {
+    updateGlobalExclusionsField("blocked_patterns", [...DEFAULT_GLOBAL_BLOCK_PATTERNS]);
+  }
+
+  function addGlobalBlockedPath(pathValue) {
+    const nextBlocked = [...(config.global_exclusions?.blocked_paths ?? [])];
+    if (!nextBlocked.includes(pathValue)) {
+      nextBlocked.push(pathValue);
+    }
+    updateGlobalExclusionsField("blocked_paths", nextBlocked);
+  }
+
+  function removeGlobalBlockedPath(index) {
+    updateGlobalExclusionsField(
+      "blocked_paths",
+      (config.global_exclusions?.blocked_paths ?? []).filter((_, blockedIndex) => blockedIndex !== index),
     );
   }
 
@@ -1398,6 +1752,19 @@ export default function App() {
         return;
       }
       addBlockedPath(payload.path);
+    } catch (browseError) {
+      setError(browseError.message);
+    }
+  }
+
+  async function handleAddGlobalBlockedByBrowse(kind = "directory") {
+    setError("");
+    try {
+      const payload = await chooseNativePath(kind);
+      if (!payload.path) {
+        return;
+      }
+      addGlobalBlockedPath(payload.path);
     } catch (browseError) {
       setError(browseError.message);
     }
@@ -1505,8 +1872,12 @@ export default function App() {
     }
   }
 
-  async function handleRunLogicProfile() {
-    const validationError = validateWorkspaceRun(serializeConfig(config));
+  async function handleRunLogicProfile(scope = null) {
+    const scopedSelection = uniqueValues(scope?.selected_files ?? []);
+    const scopedConfig = scopedSelection.length
+      ? buildScopedConfigFromFiles(config, activeResult?.files ?? files, scopedSelection)
+      : serializeConfig(config);
+    const validationError = validateWorkspaceRun(scopedConfig);
     if (validationError) {
       setError(validationError);
       return;
@@ -1515,9 +1886,13 @@ export default function App() {
     setError("");
     setNotice("");
     try {
-      const payload = await createLogicProfile(serializeConfig(config), logicWorkerCount);
+      const payload = await createLogicProfile(scopedConfig, logicWorkerCount, scopedSelection);
       await refreshV2Artifacts();
-      setNotice(`Logic profile ready for ${payload.profile.summary.file_count} files.`);
+      setNotice(
+        scopedSelection.length
+          ? `Logic profile ready for ${payload.profile.summary.file_count} files in ${scope.label}.`
+          : `Logic profile ready for ${payload.profile.summary.file_count} files.`,
+      );
     } catch (logicError) {
       setError(logicError.message);
     } finally {
@@ -1525,19 +1900,24 @@ export default function App() {
     }
   }
 
-  async function handleCreateExplainBundle() {
+  async function handleCreateExplainBundle(scope = null) {
     const snapshotBundle = snapshotBundles[0] || activeResult?.snapshot_bundle;
     if (!snapshotBundle?.id) {
       setError("Run preview or build first so there is a snapshot bundle to explain.");
       return;
     }
+    const scopedSelection = uniqueValues(scope?.selected_files ?? []);
     setBusy("explain-bundle");
     setError("");
     setNotice("");
     try {
-      const payload = await createExplainBundle(snapshotBundle.id, logicProfiles[0]?.id || null);
+      const payload = await createExplainBundle(snapshotBundle.id, logicProfiles[0]?.id || null, scopedSelection);
       await refreshV2Artifacts();
-      setNotice(`Explain bundle created with ${payload.bundle.summary.top_file_count} top files.`);
+      setNotice(
+        scopedSelection.length
+          ? `Explain bundle created for ${scope.label} with ${payload.bundle.summary.top_file_count} top files.`
+          : `Explain bundle created with ${payload.bundle.summary.top_file_count} top files.`,
+      );
     } catch (explainError) {
       setError(explainError.message);
     } finally {
@@ -1545,13 +1925,14 @@ export default function App() {
     }
   }
 
-  async function handleCreatePatchPreview() {
+  async function handleCreatePatchPreview(scope = null) {
     const snapshotBundle = snapshotBundles[0] || activeResult?.snapshot_bundle;
     if (!snapshotBundle?.id) {
       setError("Run preview or build first so there is a snapshot bundle to use.");
       return;
     }
-    const goal = buildGoalDraft.trim() || window.prompt("Build goal", "Generate a deterministic scoped improvement plan");
+    const resolvedScope = scope ? resolveCanvasScope(scope) : activeBuildScope;
+    const goal = resolvedScope?.build_goal?.trim() || buildGoalDraft.trim() || window.prompt("Build goal", "Generate a deterministic scoped improvement plan");
     if (!goal) {
       return;
     }
@@ -1560,7 +1941,17 @@ export default function App() {
       .split(",")
       .map((item) => item.trim())
       .filter(Boolean);
-    const selectedFiles = selectedFile?.rel_path ? [selectedFile.rel_path] : (activeResult?.files ?? []).slice(0, 3).map((file) => file.rel_path);
+    const selectedFiles = resolvedScope?.selected_files?.length
+      ? resolvedScope.selected_files
+      : selectedFile?.rel_path
+        ? [selectedFile.rel_path]
+        : (activeResult?.files ?? []).slice(0, 3).map((file) => file.rel_path);
+    const allowedTargets = resolvedScope?.allowed_targets?.length
+      ? resolvedScope.allowed_targets
+      : config.sources.map((source) => source.path).filter(Boolean);
+    const forbiddenPaths = resolvedScope?.forbidden_paths?.length
+      ? resolvedScope.forbidden_paths
+      : config.access.blocked_paths ?? [];
 
     setBusy("patch-preview");
     setError("");
@@ -1569,20 +1960,54 @@ export default function App() {
       const payload = await createPatchPreview({
         goal,
         snapshot_bundle_id: snapshotBundle.id,
-        explain_bundle_id: explainBundles[0]?.id || null,
+        explain_bundle_id: resolvedScope?.selected_files?.length ? null : explainBundles[0]?.id || null,
         adapter_id: "deterministic",
         selected_slcs_pieces: selectedPieces,
         selected_files: selectedFiles,
-        allowed_targets: config.sources.map((source) => source.path).filter(Boolean),
-        forbidden_paths: config.access.blocked_paths ?? [],
+        allowed_targets: allowedTargets,
+        forbidden_paths: forbiddenPaths,
+        metadata: resolvedScope?.selected_files?.length
+          ? {
+              canvas_id: resolvedScope.canvas_id || "",
+              canvas_label: canvases.find((item) => item.id === resolvedScope.canvas_id)?.name || "",
+              scope_label: resolvedScope.label,
+              workflow: resolvedScope.workflow,
+              selected_card_labels: resolvedScope.selected_card_labels,
+              review_notes: resolvedScope.review_notes,
+            }
+          : {},
       });
       await refreshV2Artifacts();
-      setNotice(`Patch preview created with ${payload.copied_file_count} scoped input files.`);
+      setNotice(
+        resolvedScope?.selected_files?.length
+          ? `Patch preview created for ${resolvedScope.label} with ${payload.copied_file_count} scoped input files.`
+          : `Patch preview created with ${payload.copied_file_count} scoped input files.`,
+      );
+      if (resolvedScope?.selected_files?.length) {
+        setActiveBuildScope(resolvedScope);
+      }
+      setMainTab("build");
+      setBuildTab("preview");
     } catch (patchError) {
       setError(patchError.message);
     } finally {
       setBusy("");
     }
+  }
+
+  function handleUseCanvasScopeInBuild(scope) {
+    const resolvedScope = resolveCanvasScope(scope);
+    if (!resolvedScope.selected_files.length) {
+      setError("This board scope does not include any file cards yet.");
+      return;
+    }
+    setActiveBuildScope(resolvedScope);
+    if (resolvedScope.build_goal) {
+      setBuildGoalDraft(resolvedScope.build_goal);
+    }
+    setMainTab("build");
+    setBuildTab("goal");
+    setNotice(`Build is now scoped to ${resolvedScope.label} (${resolvedScope.selected_files.length} files).`);
   }
 
   async function handleApplyPatchPreview() {
@@ -1755,78 +2180,501 @@ export default function App() {
         description: "Canvas board",
         cards: [],
         edges: [],
+        viewport: { x: 40, y: 40, zoom: 0.82 },
+        metadata: {},
       });
       setCanvases((current) => [...current, canvas]);
       setSelectedCanvasId(canvas.id);
-      openExploreTab(preferredExploreLane, "canvas");
+      openExploreTab(preferredExploreLane, exploreTabIdForView(preferredExploreLane, "canvas"));
     } catch (canvasError) {
       setError(canvasError.message);
     }
   }
 
-  async function handleSaveCanvas(canvas, cards) {
+  async function handleCreateCanvasFromTemplate(templateId) {
+    try {
+      const template = buildCanvasTemplate(templateId);
+      const canvas = await createCanvas(template);
+      setCanvases((current) => [...current, canvas]);
+      setSelectedCanvasId(canvas.id);
+      openExploreTab(preferredExploreLane, exploreTabIdForView(preferredExploreLane, "canvas"));
+      setNotice(`Created ${canvas.name}.`);
+    } catch (canvasError) {
+      setError(canvasError.message);
+    }
+  }
+
+  async function handleCreateCanvasFromSavedTemplate(template) {
+    if (!template) {
+      return;
+    }
+    try {
+      const canvas = await createCanvas({
+        name: `${template.name} board`,
+        description: template.description || "",
+        cards: template.cards || [],
+        edges: template.edges || [],
+        viewport: template.viewport || { x: 40, y: 40, zoom: 0.82 },
+        metadata: template.metadata || {},
+      });
+      setCanvases((current) => [...current, canvas]);
+      setSelectedCanvasId(canvas.id);
+      openExploreTab(preferredExploreLane, exploreTabIdForView(preferredExploreLane, "canvas"));
+      setNotice(`Created ${canvas.name} from template ${template.name}.`);
+    } catch (canvasError) {
+      setError(canvasError.message);
+    }
+  }
+
+  async function handleImportCanvasBoard() {
+    try {
+      const payload = await chooseNativePath("file");
+      if (!payload.path) {
+        return;
+      }
+      const imported = await importCanvasBoard(payload.path);
+      setCanvases((current) => [...current, imported.canvas]);
+      setSelectedCanvasId(imported.canvas.id);
+      openExploreTab(preferredExploreLane, exploreTabIdForView(preferredExploreLane, "canvas"));
+      setNotice(
+        `Imported canvas ${imported.canvas.name}. Added ${imported.imported_scope_count || 0} scope bookmark`
+        + `${imported.imported_scope_count === 1 ? "" : "s"} and ${imported.imported_record_count || 0} Digital Brain record`
+        + `${imported.imported_record_count === 1 ? "" : "s"}`
+        + `${imported.warnings?.length ? ` Warnings: ${imported.warnings.join(" ")}` : "."}`,
+      );
+    } catch (canvasError) {
+      setError(canvasError.message);
+    }
+  }
+
+  async function handleSaveCanvasAsTemplate(canvas) {
+    if (!canvas) {
+      return;
+    }
+    const name = window.prompt("Template name", `${canvas.name} template`);
+    if (!name) {
+      return;
+    }
+    try {
+      const template = await createCanvasTemplate({
+        name,
+        description: canvas.description || "",
+        cards: canvas.cards || [],
+        edges: canvas.edges || [],
+        viewport: canvas.viewport || { x: 40, y: 40, zoom: 0.82 },
+        metadata: canvas.metadata || {},
+      });
+      setCanvasTemplates((current) => [template, ...current.filter((item) => item.id !== template.id)]);
+      setNotice(`Saved template ${template.name}.`);
+    } catch (templateError) {
+      setError(templateError.message);
+    }
+  }
+
+  async function handleUpdateCanvasTemplateFromCanvas(template, canvas) {
+    if (!template || !canvas) {
+      return;
+    }
+    try {
+      const updated = await updateCanvasTemplate(template.id, {
+        name: template.name,
+        description: canvas.description || template.description || "",
+        cards: canvas.cards || [],
+        edges: canvas.edges || [],
+        viewport: canvas.viewport || { x: 40, y: 40, zoom: 0.82 },
+        metadata: canvas.metadata || template.metadata || {},
+      });
+      setCanvasTemplates((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setNotice(`Updated template ${updated.name} from the current board.`);
+    } catch (templateError) {
+      setError(templateError.message);
+    }
+  }
+
+  async function handleDeleteCanvasTemplate(template) {
+    if (!template) {
+      return;
+    }
+    const confirmed = window.confirm(`Delete template "${template.name}"?`);
+    if (!confirmed) {
+      return;
+    }
+    try {
+      await deleteCanvasTemplate(template.id);
+      setCanvasTemplates((current) => current.filter((item) => item.id !== template.id));
+      setNotice(`Deleted template ${template.name}.`);
+    } catch (templateError) {
+      setError(templateError.message);
+    }
+  }
+
+  async function handleExportCanvasBoard(canvas) {
     if (!canvas) {
       return;
     }
     try {
+      const payload = await exportCanvasBoard(canvas.id);
+      setNotice(`Canvas exported to ${payload.path}`);
+    } catch (exportError) {
+      setError(exportError.message);
+    }
+  }
+
+  async function handleSaveCanvasState(canvas, options = {}) {
+    if (!canvas) {
+      return;
+    }
+    const activeSnapshot = snapshotBundles[0] || activeResult?.snapshot_bundle || null;
+    const { skipSave = false, label = `${canvas.name} board state`, silent = false } = options;
+    try {
+      if (!skipSave) {
+        await handleSaveCanvas(canvas, null, { silent: true });
+      }
+      const snapshot = await createCanvasSnapshot(canvas.id, {
+        label,
+        snapshot_bundle_id: activeSnapshot?.id || null,
+        snapshot_bundle_label: activeSnapshot?.label || null,
+      });
+      setSnapshots((current) => [snapshot, ...current.filter((item) => item.id !== snapshot.id)]);
+      if (!silent) {
+        setNotice(`Saved board state for ${canvas.name}.`);
+      }
+    } catch (snapshotError) {
+      setError(snapshotError.message);
+    }
+  }
+
+  async function handleSaveCanvas(canvasPayload, cards, options = {}) {
+    if (!canvasPayload) {
+      return;
+    }
+    const { silent = false } = options;
+    try {
+      const canvas = cards
+        ? {
+            ...canvasPayload,
+            cards,
+          }
+        : canvasPayload;
       const saved = await updateCanvas(canvas.id, {
         name: canvas.name,
         description: canvas.description || "",
-        cards,
+        cards: canvas.cards || [],
         edges: canvas.edges || [],
+        viewport: canvas.viewport || { x: 0, y: 0, zoom: 1 },
+        metadata: canvas.metadata || {},
       });
       setCanvases((current) => current.map((item) => (item.id === saved.id ? saved : item)));
-      setNotice(`Saved canvas ${saved.name}.`);
+      if (!silent) {
+        setNotice(`Saved canvas ${saved.name}.`);
+      }
     } catch (canvasError) {
       setError(canvasError.message);
     }
   }
 
-  async function handleAddFileCard(canvas, file) {
-    if (!canvas || !file) {
-      return;
-    }
-    const cards = [
-      ...(canvas.cards || []),
-      {
-        id: crypto.randomUUID(),
-        type: "file",
-        label: file.label,
-        path: file.original_path,
-        file_id: file.id,
-        x: 32 + (canvas.cards || []).length * 22,
-        y: 32 + (canvas.cards || []).length * 18,
-        width: 300,
-        height: 180,
-        color: "violet",
-      },
-    ];
-    await handleSaveCanvas(canvas, cards);
+  function resolveCanvasScope(scope) {
+    const selectedFiles = uniqueValues(scope?.selected_files ?? []);
+    return {
+      selected_files: selectedFiles,
+      label: scope?.label || "Canvas scope",
+      description: scope?.description || "",
+      canvas_id: scope?.canvas_id || "",
+      card_count: scope?.card_count || 0,
+      selected_card_labels: scope?.selected_card_labels ?? [],
+      selected_card_ids: scope?.selected_card_ids ?? [],
+      note_card_count: scope?.note_card_count || 0,
+      group_card_count: scope?.group_card_count || 0,
+      link_count: scope?.link_count || 0,
+      build_goal: scope?.build_goal || "",
+      allowed_targets: uniqueValues(scope?.allowed_targets ?? []),
+      forbidden_paths: uniqueValues(scope?.forbidden_paths ?? []),
+      workflow: scope?.workflow || "research-synthesis",
+      review_notes: scope?.review_notes || "",
+      snapshot_label: scope?.snapshot_label || "",
+    };
   }
 
-  async function handleAddTextCard(canvas) {
+  async function handleDeleteCanvas(canvas) {
+    if (!canvas || canvases.length <= 1) {
+      setError("Keep at least one canvas board available.");
+      return;
+    }
+    const confirmed = window.confirm(`Delete canvas "${canvas.name}"?`);
+    if (!confirmed) {
+      return;
+    }
+    try {
+      await deleteCanvas(canvas.id);
+      const nextCanvases = canvases.filter((item) => item.id !== canvas.id);
+      setCanvases(nextCanvases);
+      setSelectedCanvasId(nextCanvases[0]?.id || "");
+      setNotice(`Deleted canvas ${canvas.name}.`);
+    } catch (canvasError) {
+      setError(canvasError.message);
+    }
+  }
+
+  async function handleDuplicateCanvas(canvas) {
     if (!canvas) {
       return;
     }
-    const text = window.prompt("Card text", "New idea");
-    if (!text) {
+    try {
+      const idMap = new Map();
+      const duplicatedCards = (canvas.cards || []).map((card, index) => {
+        const nextId = crypto.randomUUID();
+        idMap.set(card.id, nextId);
+        return {
+          ...card,
+          id: nextId,
+          x: Number(card.x || 0) + 40 + index * 6,
+          y: Number(card.y || 0) + 30 + index * 4,
+        };
+      });
+      const duplicate = await createCanvas({
+        name: `${canvas.name} copy`,
+        description: canvas.description || "",
+        cards: duplicatedCards,
+        edges: (canvas.edges || [])
+          .map((edge) => ({
+            ...edge,
+            id: crypto.randomUUID(),
+            from_card: idMap.get(edge.from_card),
+            to_card: idMap.get(edge.to_card),
+          }))
+          .filter((edge) => edge.from_card && edge.to_card),
+        viewport: canvas.viewport || { x: 0, y: 0, zoom: 1 },
+        metadata: canvas.metadata || {},
+      });
+      setCanvases((current) => [...current, duplicate]);
+      setSelectedCanvasId(duplicate.id);
+      setNotice(`Duplicated canvas ${canvas.name}.`);
+    } catch (canvasError) {
+      setError(canvasError.message);
+    }
+  }
+
+  async function handleAddGraphNodeToCanvas(node) {
+    const targetCanvas = canvases.find((canvas) => canvas.id === selectedCanvasId) || canvases[0];
+    if (!targetCanvas || !node) {
       return;
     }
-    const cards = [
-      ...(canvas.cards || []),
-      {
-        id: crypto.randomUUID(),
-        type: "text",
-        label: text.split("\n")[0].slice(0, 48),
-        text,
-        x: 40 + (canvas.cards || []).length * 18,
-        y: 40 + (canvas.cards || []).length * 18,
-        width: 280,
-        height: 180,
-        color: "mint",
-      },
-    ];
-    await handleSaveCanvas(canvas, cards);
+    const file =
+      fileLookup.get(node.id) ||
+      fileLookup.get(node.file_id) ||
+      files.find((item) => item.original_path === node.path || (item.rel_path === node.rel_path && item.source_name === node.source)) ||
+      null;
+    const nextCard = createCanvasCardFromGraphNode(node, file, (targetCanvas.cards || []).length);
+    await handleSaveCanvas({
+      ...targetCanvas,
+      cards: [...(targetCanvas.cards || []), nextCard],
+      edges: targetCanvas.edges || [],
+      viewport: targetCanvas.viewport || { x: 40, y: 40, zoom: 0.82 },
+    });
+    setSelectedCanvasId(targetCanvas.id);
+    openExploreTab(preferredExploreLane, exploreTabIdForView(preferredExploreLane, "canvas"));
+    setNotice(`Added ${nextCard.label} to ${targetCanvas.name}.`);
+  }
+
+  async function handleSendFileToCanvas(file) {
+    const targetCanvas = canvases.find((canvas) => canvas.id === selectedCanvasId) || canvases[0];
+    if (!targetCanvas || !file) {
+      return;
+    }
+    await handleSaveCanvas({
+      ...targetCanvas,
+      cards: [
+        ...(targetCanvas.cards || []),
+        {
+          id: crypto.randomUUID(),
+          type: "file",
+          label: file.label,
+          path: file.original_path,
+          file_id: file.id,
+          text: file.summary || file.rel_path || "",
+          note: "",
+          x: 140 + (targetCanvas.cards || []).length * 18,
+          y: 140 + (targetCanvas.cards || []).length * 16,
+          width: 340,
+          height: 220,
+          color: "violet",
+          locked: false,
+        },
+      ],
+      edges: targetCanvas.edges || [],
+      viewport: targetCanvas.viewport || { x: 40, y: 40, zoom: 0.82 },
+    });
+    setSelectedCanvasId(targetCanvas.id);
+    openExploreTab(preferredExploreLane, exploreTabIdForView(preferredExploreLane, "canvas"));
+    setNotice(`Added ${file.label} to ${targetCanvas.name}.`);
+  }
+
+  async function handleSaveCanvasScope(scope) {
+    const resolvedScope = resolveCanvasScope(scope);
+    if (!resolvedScope.selected_files.length) {
+      setError("This scope does not include any files yet.");
+      return;
+    }
+    const activeSnapshot = snapshotBundles[0] || activeResult?.snapshot_bundle || null;
+    try {
+      const bookmark = await createBookmark({
+        type: "canvas",
+        label: resolvedScope.label,
+        metadata: {
+          ...resolvedScope,
+          lane: preferredExploreLane,
+          snapshot_bundle_id: activeSnapshot?.id || null,
+          snapshot_label: activeSnapshot?.label || null,
+        },
+      });
+      setBookmarks((current) => [bookmark, ...current.filter((item) => item.id !== bookmark.id)]);
+      setNotice(`Saved scope ${resolvedScope.label}.`);
+    } catch (bookmarkError) {
+      setError(bookmarkError.message);
+    }
+  }
+
+  async function handleSaveCanvasScopeAsPreset(scope) {
+    const resolvedScope = resolveCanvasScope(scope);
+    if (!resolvedScope.selected_files.length) {
+      setError("This scope does not include any files yet.");
+      return;
+    }
+    try {
+      const scopedConfig = buildScopedConfigFromFiles(config, activeResult?.files ?? files, resolvedScope.selected_files);
+      const preset = await createPreset({
+        name: `Build scope: ${resolvedScope.label}`,
+        description: `Reusable Build preset generated from canvas scope ${resolvedScope.label}.`,
+        config: scopedConfig,
+      });
+      setPresets((current) => [preset, ...current.filter((item) => item.id !== preset.id)]);
+      setNotice(`Saved Build preset from ${resolvedScope.label}.`);
+    } catch (presetError) {
+      setError(presetError.message);
+    }
+  }
+
+  async function handlePromoteCanvasScope(scope, seedKind) {
+    const resolvedScope = resolveCanvasScope(scope);
+    if (!resolvedScope.selected_files.length) {
+      setError("This scope does not include any files yet.");
+      return;
+    }
+    const activeSnapshot = snapshotBundles[0] || activeResult?.snapshot_bundle || null;
+    const labelPrefixMap = {
+      memory: "Memory",
+      decision: "Decision",
+      topic: "Topic",
+      task: "Task",
+    };
+    const labelPrefix = labelPrefixMap[seedKind] || "Memory";
+    try {
+      const record = await createDigitalBrainRecord({
+        kind: seedKind,
+        title: `${labelPrefix}: ${resolvedScope.label}`,
+        summary: resolvedScope.description || `${labelPrefix} promoted from canvas scope.`,
+        selected_files: resolvedScope.selected_files,
+        source_scope_label: resolvedScope.label,
+        canvas_id: resolvedScope.canvas_id || null,
+        snapshot_bundle_id: activeSnapshot?.id || null,
+        snapshot_bundle_label: activeSnapshot?.label || null,
+        status: "promoted",
+        confidence: seedKind === "decision" ? 0.74 : seedKind === "task" ? 0.68 : 0.7,
+        metadata: {
+          selected_card_labels: resolvedScope.selected_card_labels,
+          card_count: resolvedScope.card_count,
+          link_count: resolvedScope.link_count,
+          build_goal: resolvedScope.build_goal || "",
+        },
+      });
+      setDigitalBrainRecords((current) => [record, ...current.filter((item) => item.id !== record.id)]);
+      setNotice(`Promoted ${resolvedScope.label} to Digital Brain ${seedKind}.`);
+    } catch (bookmarkError) {
+      setError(bookmarkError.message);
+    }
+  }
+
+  async function handleUpdateDigitalBrainRecord(record, updates) {
+    if (!record) {
+      return;
+    }
+    try {
+      const updated = await updateDigitalBrainRecord(record.id, {
+        kind: record.kind,
+        title: updates.title ?? record.title,
+        summary: updates.summary ?? record.summary,
+        selected_files: updates.selected_files ?? record.selected_files ?? [],
+        source_scope_label: updates.source_scope_label ?? record.source_scope_label ?? "",
+        canvas_id: updates.canvas_id ?? record.canvas_id ?? null,
+        snapshot_bundle_id: updates.snapshot_bundle_id ?? record.snapshot_bundle_id ?? null,
+        snapshot_bundle_label: updates.snapshot_bundle_label ?? record.snapshot_bundle_label ?? null,
+        status: updates.status ?? record.status ?? "promoted",
+        confidence: updates.confidence ?? record.confidence ?? 0.72,
+        review_status: updates.review_status ?? record.review_status ?? "new",
+        provenance_notes: updates.provenance_notes ?? record.provenance_notes ?? "",
+        metadata: updates.metadata ?? record.metadata ?? {},
+      });
+      setDigitalBrainRecords((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setSelectedBrainRecordId(updated.id);
+      setNotice(`Updated ${updated.title}.`);
+    } catch (recordError) {
+      setError(recordError.message);
+    }
+  }
+
+  async function handleDeleteDigitalBrainRecord(record) {
+    if (!record) {
+      return;
+    }
+    const confirmed = window.confirm(`Delete ${record.title}?`);
+    if (!confirmed) {
+      return;
+    }
+    try {
+      await deleteDigitalBrainRecord(record.id);
+      setDigitalBrainRecords((current) => current.filter((item) => item.id !== record.id));
+      if (selectedBrainRecordId === record.id) {
+        setSelectedBrainRecordId("");
+      }
+      setNotice(`Deleted ${record.title}.`);
+    } catch (recordError) {
+      setError(recordError.message);
+    }
+  }
+
+  async function handleSaveCurrentBrainView() {
+    const defaultLabel = selectedFocusNode?.label
+      ? `Focus: ${selectedFocusNode.label}`
+      : selectedBrainRecord?.title
+        ? `Record: ${selectedBrainRecord.title}`
+        : "Digital Brain focus";
+    const label = window.prompt("Cognitive view name", defaultLabel);
+    if (!label) {
+      return;
+    }
+    const metadata = {
+      lane: "digital-brain",
+      preferred_view: selectedBrainRecord?.kind === "decision" ? "decisions" : "focus",
+      anchor_node_id: selectedFocusNode?.id || "",
+      anchor_file_rel_path: selectedFile?.rel_path || "",
+      focus_node_label: selectedFocusNode?.label || "",
+      record_id: selectedBrainRecord?.id || "",
+      graph_density: config.digital_brain.graph_density,
+      node_count: digitalBrainFocusGraph?.summary?.node_count || 0,
+      edge_count: digitalBrainFocusGraph?.summary?.edge_count || 0,
+      why: selectedFocusNode?.why_surfaced || [],
+    };
+    try {
+      const bookmark = await createBookmark({
+        type: "brain_view",
+        label,
+        metadata,
+      });
+      setBookmarks((current) => [bookmark, ...current.filter((item) => item.id !== bookmark.id)]);
+      setNotice(`Saved cognitive view ${label}.`);
+    } catch (bookmarkError) {
+      setError(bookmarkError.message);
+    }
   }
 
   function selectFile(file) {
@@ -1836,12 +2684,27 @@ export default function App() {
   }
 
   function selectGraphNode(node) {
+    setSelectedFocusNodeId(node?.id || "");
     const file = fileLookup.get(node.id) || fileLookup.get(node.file_id) || null;
     if (file) {
-      selectFile(file);
+      setSelectedFile(file);
+      setQuickOpen(false);
       return;
     }
     setSelectedFile(null);
+  }
+
+  function handleOpenCanvasFile(card) {
+    if (!card?.file_id && !card?.path) {
+      return;
+    }
+    const file =
+      (card.file_id ? fileLookup.get(card.file_id) : null) ||
+      files.find((item) => item.original_path === card.path) ||
+      null;
+    if (file) {
+      selectFile(file);
+    }
   }
 
   function selectBookmark(bookmark) {
@@ -1850,7 +2713,58 @@ export default function App() {
       if (match) {
         selectFile(match);
       }
+      return;
     }
+    if (bookmark.type === "canvas") {
+      const scope = resolveCanvasScope(bookmark.metadata || {});
+      const targetLane = bookmark.metadata?.lane === "digital-brain" ? "digital-brain" : "structure";
+      if (scope.canvas_id) {
+        setSelectedCanvasId(scope.canvas_id);
+      }
+      setActiveBuildScope(scope);
+      openExploreTab(targetLane, exploreTabIdForView(targetLane, "canvas"));
+      setNotice(`Loaded saved scope ${scope.label}.`);
+      return;
+    }
+    if (bookmark.type === "brain_view") {
+      const metadata = bookmark.metadata || {};
+      if (metadata.record_id) {
+        setSelectedBrainRecordId(metadata.record_id);
+      }
+      if (metadata.anchor_node_id) {
+        setSelectedFocusNodeId(metadata.anchor_node_id);
+      }
+      if (metadata.anchor_file_rel_path) {
+        const match = files.find((file) => file.rel_path === metadata.anchor_file_rel_path);
+        if (match) {
+          setSelectedFile(match);
+        }
+      }
+      openExploreTab("digital-brain", metadata.preferred_view || "focus");
+      setNotice(`Opened saved cognitive view ${bookmark.label}.`);
+    }
+  }
+
+  function selectDigitalBrainRecord(record) {
+    if (!record) {
+      return;
+    }
+    setSelectedBrainRecordId(record.id);
+    const scope = resolveCanvasScope({
+      selected_files: record.selected_files || [],
+      label: record.title,
+      description: record.summary || "",
+      canvas_id: record.canvas_id || "",
+    });
+    setActiveBuildScope(scope);
+    const firstRelPath = record.selected_files?.[0];
+    if (firstRelPath) {
+      const file = files.find((item) => item.rel_path === firstRelPath);
+      if (file) {
+        setSelectedFile(file);
+      }
+    }
+    openExploreTab("digital-brain", record.kind === "decision" ? "decisions" : "memory");
   }
 
   const latestSnapshotBundle = snapshotBundles[0] || activeResult?.snapshot_bundle || null;
@@ -1869,7 +2783,26 @@ export default function App() {
         ? logicTab
         : mainTab === "explain"
           ? explainTab
-          : buildTab;
+        : buildTab;
+  const scopeCompareLeft = canvasScopeBookmarks.find((item) => item.id === scopeCompareLeftId) || null;
+  const scopeCompareRight = canvasScopeBookmarks.find((item) => item.id === scopeCompareRightId) || null;
+  const scopeComparison = useMemo(() => {
+    if (!scopeCompareLeft || !scopeCompareRight) {
+      return null;
+    }
+    return buildSavedScopeComparison(scopeCompareLeft, scopeCompareRight);
+  }, [scopeCompareLeft, scopeCompareRight]);
+  const activeBuildScopeChecks = useMemo(() => {
+    if (!activeBuildScope) {
+      return [];
+    }
+    return [
+      { id: "files", label: "Scope has files", pass: (activeBuildScope.selected_files?.length ?? 0) > 0 },
+      { id: "goal", label: "Board goal is present", pass: Boolean(activeBuildScope.build_goal?.trim()) },
+      { id: "targets", label: "Allowed targets are present", pass: Boolean(activeBuildScope.allowed_targets?.length) },
+      { id: "review", label: "Review notes are present", pass: Boolean(activeBuildScope.review_notes?.trim()) },
+    ];
+  }, [activeBuildScope]);
 
   function handleMainTabChange(tabId) {
     if (tabId === "structure") {
@@ -2329,6 +3262,51 @@ export default function App() {
                           <option value="cached_content">Cached content</option>
                         </select>
                       </label>
+                      <label>
+                        <span>Workspace file sync policy</span>
+                        <select
+                          value={config.digital_brain.workspace_file_sync_policy}
+                          onChange={(event) => updateDigitalBrainField("workspace_file_sync_policy", event.target.value)}
+                        >
+                          <option value="surface_only">Surface only</option>
+                          <option value="metadata_then_focus">Metadata then focus</option>
+                          <option value="always_deepen">Always deepen</option>
+                        </select>
+                      </label>
+                      <label>
+                        <span>Notes sync policy</span>
+                        <select
+                          value={config.digital_brain.notes_sync_policy}
+                          onChange={(event) => updateDigitalBrainField("notes_sync_policy", event.target.value)}
+                        >
+                          <option value="disabled">Disabled</option>
+                          <option value="surface_only">Surface only</option>
+                          <option value="metadata_then_focus">Metadata then focus</option>
+                          <option value="always_deepen">Always deepen</option>
+                        </select>
+                      </label>
+                      <label>
+                        <span>Recent activity policy</span>
+                        <select
+                          value={config.digital_brain.recent_activity_sync_policy}
+                          onChange={(event) => updateDigitalBrainField("recent_activity_sync_policy", event.target.value)}
+                        >
+                          <option value="disabled">Disabled</option>
+                          <option value="ranking_only">Ranking only</option>
+                          <option value="metadata_then_focus">Metadata then focus</option>
+                        </select>
+                      </label>
+                      <label>
+                        <span>Chat sync policy</span>
+                        <select
+                          value={config.digital_brain.chat_sync_policy}
+                          onChange={(event) => updateDigitalBrainField("chat_sync_policy", event.target.value)}
+                        >
+                          <option value="planned">Planned</option>
+                          <option value="disabled">Disabled</option>
+                          <option value="metadata_then_focus">Metadata then focus</option>
+                        </select>
+                      </label>
                     </div>
                     <div className="graph-focus-group">
                       <span className="field-label">Priority categories</span>
@@ -2372,6 +3350,41 @@ export default function App() {
                     <p className="microcopy">
                       DB1 keeps the same approved workspace boundary as Structure, but these settings begin to steer Digital Brain toward selective, staged, high-value indexing.
                     </p>
+                  </section>
+                ) : null}
+                {activeExploreLane === "digital-brain" ? (
+                  <section className="panel">
+                    <div className="panel__header">
+                      <div>
+                        <span className="eyebrow">DB4 attention policy</span>
+                        <h3>Why each source class earns deeper reading</h3>
+                      </div>
+                    </div>
+                    {digitalBrainSourcePriority.length ? (
+                      <div className="summary-list">
+                        {digitalBrainSourcePriority.map((entry) => (
+                          <article className="summary-card" key={`${entry.source_id}-${entry.sync_policy}`}>
+                            <div className="summary-card__header">
+                              <div>
+                                <span className="eyebrow">{entry.source_type}</span>
+                                <h3>{entry.label}</h3>
+                              </div>
+                              <div className="summary-pill">{entry.sync_policy}</div>
+                            </div>
+                            <div className="microcopy">{entry.reason}</div>
+                            <div className="chip-row">
+                              <span className="path-chip">Priority {entry.priority_score}</span>
+                              <span className="path-chip">{entry.status}</span>
+                              <span className="path-chip">
+                                {entry.deeper_read_eligible ? "Eligible for deeper reading" : "Surface-only for now"}
+                              </span>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="empty-copy">Run preview so Digital Brain can compute the current source-class attention order.</p>
+                    )}
                   </section>
                 ) : null}
                 {activeExploreLane === "digital-brain" ? (
@@ -2477,110 +3490,218 @@ export default function App() {
                   <div className="panel__header panel__header--spread">
                     <div>
                       <span className="eyebrow">Sandbox</span>
-                      <h3>Output folder and exclusion rules</h3>
+                      <h3>Workspace boundary and output rules</h3>
                     </div>
                     <button className="secondary-button" type="button" onClick={handleCreateNote}>
                       New note
                     </button>
                   </div>
-                  <div className="field-grid">
-                    <label>
-                      <span>Workspace name</span>
-                      <input value={config.vault_name} onChange={(event) => updateField("vault_name", event.target.value)} />
-                    </label>
-                    <label>
-                      <span>Folder to save graphs and builds</span>
-                      <div className="path-field">
-                        <input
-                          value={config.output_dir}
-                          onChange={(event) => updateField("output_dir", event.target.value)}
-                          placeholder="../build/context-vault-studio"
-                        />
-                        <button className="secondary-button" type="button" onClick={handleBrowseOutputDirectory}>
-                          Browse
-                        </button>
+                  <div className="sandbox-overview">
+                    <div className="sandbox-stat">
+                      <span>Workspace</span>
+                      <strong>{config.vault_name || "Untitled workspace"}</strong>
+                      <small>{config.output_dir || "Choose an output folder for builds and graphs."}</small>
+                    </div>
+                    <div className="sandbox-stat">
+                      <span>Build mode</span>
+                      <strong>{config.default_mode === "symlink" ? "Symlink" : "Copy"}</strong>
+                      <small>{config.default_mode === "symlink" ? "Convenience first" : "Hard curated boundary"}</small>
+                    </div>
+                    <div className="sandbox-stat">
+                      <span>Workspace-only rules</span>
+                      <strong>{blockedRuleCount}</strong>
+                      <small>Only this workspace uses them.</small>
+                    </div>
+                    <div className="sandbox-stat">
+                      <span>Global rules</span>
+                      <strong>{globalBlockedRuleCount}</strong>
+                      <small>Applied to every model in this app.</small>
+                    </div>
+                  </div>
+                  <div className="sandbox-grid">
+                    <article className="sandbox-card">
+                      <div className="sandbox-card__header">
+                        <div>
+                          <span className="eyebrow">Destination</span>
+                          <h4>Where the active model is stored</h4>
+                        </div>
                       </div>
-                    </label>
-                    <label>
-                      <span>Default mode</span>
-                      <select value={config.default_mode} onChange={(event) => updateField("default_mode", event.target.value)}>
-                        <option value="copy">Copy</option>
-                        <option value="symlink">Symlink</option>
-                      </select>
-                    </label>
-                    <label>
-                      <span>Max file size (bytes)</span>
-                      <input
-                        type="number"
-                        min="1"
-                        value={config.max_file_size_bytes}
-                        onChange={(event) => updateField("max_file_size_bytes", Number(event.target.value) || 1)}
-                      />
-                    </label>
-                    <label>
-                      <span>Default include patterns</span>
-                      <textarea
-                        rows="4"
-                        value={joinLines(config.default_include)}
-                        onChange={(event) => updateField("default_include", splitLines(event.target.value))}
-                        placeholder={"README.md\n**/*.md"}
-                      />
-                    </label>
-                    <label>
-                      <span>Default exclude patterns</span>
-                      <textarea
-                        rows="4"
-                        value={joinLines(config.default_exclude)}
-                        onChange={(event) => updateField("default_exclude", splitLines(event.target.value))}
-                        placeholder={"node_modules/**\ndist/**"}
-                      />
-                    </label>
-                    <div className="field-grid__wide">
-                      <span className="field-label">Excluded folders / files</span>
-                      <div className="hero__actions hero__actions--tight">
-                        <button className="secondary-button" type="button" onClick={() => handleAddBlockedByBrowse("directory")}>
-                          Exclude folder / disk
-                        </button>
-                        <button className="secondary-button" type="button" onClick={() => handleAddBlockedByBrowse("file")}>
-                          Exclude file
-                        </button>
+                      <div className="field-grid">
+                        <label>
+                          <span>Workspace name</span>
+                          <input value={config.vault_name} onChange={(event) => updateField("vault_name", event.target.value)} />
+                        </label>
+                        <label>
+                          <span>Folder to save graphs and builds</span>
+                          <div className="path-field">
+                            <input
+                              value={config.output_dir}
+                              onChange={(event) => updateField("output_dir", event.target.value)}
+                              placeholder="../build/context-vault-studio"
+                            />
+                            <button className="secondary-button" type="button" onClick={handleBrowseOutputDirectory}>
+                              Browse
+                            </button>
+                          </div>
+                        </label>
                       </div>
+                    </article>
+
+                    <article className="sandbox-card">
+                      <div className="sandbox-card__header">
+                        <div>
+                          <span className="eyebrow">Build defaults</span>
+                          <h4>What gets copied into the model</h4>
+                        </div>
+                      </div>
+                      <div className="field-grid">
+                        <label>
+                          <span>Default mode</span>
+                          <select value={config.default_mode} onChange={(event) => updateField("default_mode", event.target.value)}>
+                            <option value="copy">Copy</option>
+                            <option value="symlink">Symlink</option>
+                          </select>
+                        </label>
+                        <label>
+                          <span>Max file size (bytes)</span>
+                          <input
+                            type="number"
+                            min="1"
+                            value={config.max_file_size_bytes}
+                            onChange={(event) => updateField("max_file_size_bytes", Number(event.target.value) || 1)}
+                          />
+                        </label>
+                        <label>
+                          <span>Default include patterns</span>
+                          <textarea
+                            rows="4"
+                            value={joinLines(config.default_include)}
+                            onChange={(event) => updateField("default_include", splitLines(event.target.value))}
+                            placeholder={"README.md\n**/*.md"}
+                          />
+                        </label>
+                        <label>
+                          <span>Default exclude patterns</span>
+                          <textarea
+                            rows="4"
+                            value={joinLines(config.default_exclude)}
+                            onChange={(event) => updateField("default_exclude", splitLines(event.target.value))}
+                            placeholder={"node_modules/**\ndist/**"}
+                          />
+                        </label>
+                      </div>
+                    </article>
+
+                    <article className="sandbox-card sandbox-card--wide">
+                      <div className="sandbox-card__header sandbox-card__header--spread">
+                        <div>
+                          <span className="eyebrow">Workspace exclusions</span>
+                          <h4>Hide or block paths only for this workspace</h4>
+                        </div>
+                        <div className="hero__actions hero__actions--tight">
+                          <button className="secondary-button" type="button" onClick={() => handleAddBlockedByBrowse("directory")}>
+                            Exclude folder / disk
+                          </button>
+                          <button className="secondary-button" type="button" onClick={() => handleAddBlockedByBrowse("file")}>
+                            Exclude file
+                          </button>
+                        </div>
+                      </div>
+                      <p className="microcopy">
+                        Use these for project-specific private folders, generated outputs, or temporary areas you do not want in this one model.
+                      </p>
                       <BlockedPathList
                         blockedPaths={config.access.blocked_paths ?? []}
                         onRemove={removeBlockedPath}
+                        emptyCopy="No workspace-only exclusions yet."
                       />
-                    </div>
-                    <label>
-                      <span>Blocked patterns</span>
-                      <textarea
-                        rows="4"
-                        value={joinLines(config.access.blocked_patterns)}
-                        onChange={(event) => updateAccessField("blocked_patterns", splitLines(event.target.value))}
-                        placeholder={"**/*.key\n**/drafts/private/**"}
+                      <label>
+                        <span>Blocked patterns</span>
+                        <textarea
+                          rows="4"
+                          value={joinLines(config.access.blocked_patterns)}
+                          onChange={(event) => updateAccessField("blocked_patterns", splitLines(event.target.value))}
+                          placeholder={"**/*.key\n**/drafts/private/**"}
+                        />
+                      </label>
+                    </article>
+
+                    <article className="sandbox-card sandbox-card--wide">
+                      <div className="sandbox-card__header sandbox-card__header--spread">
+                        <div>
+                          <span className="eyebrow">Global exclusions</span>
+                          <h4>Rules that apply to every model you build here</h4>
+                        </div>
+                        <div className="hero__actions hero__actions--tight">
+                          <button className="ghost-button" type="button" onClick={restoreDefaultGlobalBlockedPatterns}>
+                            Restore defaults
+                          </button>
+                          <button className="secondary-button" type="button" onClick={() => handleAddGlobalBlockedByBrowse("directory")}>
+                            Exclude folder globally
+                          </button>
+                          <button className="secondary-button" type="button" onClick={() => handleAddGlobalBlockedByBrowse("file")}>
+                            Exclude file globally
+                          </button>
+                        </div>
+                      </div>
+                      <div className="artifact-note sandbox-note">
+                        <strong>Recommended global ignores</strong>
+                        <span>Click any pattern to add or remove it from the global block list.</span>
+                      </div>
+                      <div className="sandbox-chip-bank">
+                        {RECOMMENDED_GLOBAL_BLOCK_PATTERNS.map((pattern) => (
+                          <button
+                            key={pattern}
+                            className={`sandbox-chip ${globalBlockedPatternSet.has(pattern) ? "sandbox-chip--active" : ""}`}
+                            type="button"
+                            onClick={() => toggleGlobalBlockedPattern(pattern)}
+                          >
+                            {pattern}
+                          </button>
+                        ))}
+                      </div>
+                      <BlockedPathList
+                        blockedPaths={config.global_exclusions.blocked_paths ?? []}
+                        onRemove={removeGlobalBlockedPath}
+                        emptyCopy="No global path exclusions yet."
                       />
-                    </label>
+                      <label>
+                        <span>Global blocked patterns</span>
+                        <textarea
+                          rows="5"
+                          value={joinLines(config.global_exclusions.blocked_patterns)}
+                          onChange={(event) => updateGlobalExclusionsField("blocked_patterns", splitLines(event.target.value))}
+                          placeholder={".DS_Store\nThumbs.db\n.git/**\nnode_modules/**"}
+                        />
+                      </label>
+                    </article>
                   </div>
-                  <p className="microcopy">
-                    Every folder or disk you add in Setup is automatically treated as an allowed root. Use exclusions here to define the sandbox boundary.
-                  </p>
-                  <label className="checkbox-field">
-                    <input
-                      type="checkbox"
-                      checked={config.access.enforce_copy_mode}
-                      onChange={(event) => updateAccessField("enforce_copy_mode", event.target.checked)}
-                    />
-                    <span>Force copy-only builds so the generated vault becomes the hard curated boundary.</span>
-                  </label>
-                  <div className="hero__actions hero__actions--tight">
-                    <button className="secondary-button" type="button" onClick={handleSave} disabled={!!busy}>
-                      {busy === "save" ? "Saving..." : "Save settings"}
-                    </button>
-                    <button className="ghost-button" type="button" onClick={exportConfig}>
-                      Export JSON
-                    </button>
-                    <button className="ghost-button" type="button" onClick={handleExportBundle}>
-                      Export bundle
-                    </button>
+                  <div className="artifact-note sandbox-note">
+                    <strong>Where these rules apply</strong>
+                    <span>Preview, build, refresh model, notes, and graph all honor the same sandbox boundary.</span>
+                    <span>Every folder or disk you add in Setup is automatically treated as an allowed root.</span>
+                    <span>Workspace exclusions only affect this workspace. Global exclusions follow every model you build in this app.</span>
+                  </div>
+                  <div className="sandbox-footer">
+                    <label className="checkbox-field">
+                      <input
+                        type="checkbox"
+                        checked={config.access.enforce_copy_mode}
+                        onChange={(event) => updateAccessField("enforce_copy_mode", event.target.checked)}
+                      />
+                      <span>Force copy-only builds so the generated vault becomes the hard curated boundary.</span>
+                    </label>
+                    <div className="hero__actions hero__actions--tight">
+                      <button className="secondary-button" type="button" onClick={handleSave} disabled={!!busy}>
+                        {busy === "save" ? "Saving..." : "Save settings"}
+                      </button>
+                      <button className="ghost-button" type="button" onClick={exportConfig}>
+                        Export JSON
+                      </button>
+                      <button className="ghost-button" type="button" onClick={handleExportBundle}>
+                        Export bundle
+                      </button>
+                    </div>
                   </div>
                 </section>
               </div>
@@ -2606,13 +3727,20 @@ export default function App() {
                     <span className="eyebrow">{activeExploreLane === "digital-brain" ? "Focus" : "Graph"}</span>
                     <h3>{activeExploreLane === "digital-brain" ? "Cognitive focus of the current workspace" : "Visual structure of the current workspace"}</h3>
                   </div>
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    onClick={() => openExploreTab(activeExploreLane, exploreTabIdForView(activeExploreLane, "notes"))}
-                  >
-                    {activeExploreLane === "digital-brain" ? "Open selected memory" : "Open selected notes"}
-                  </button>
+                  <div className="hero__actions hero__actions--tight">
+                    {activeExploreLane === "digital-brain" ? (
+                      <button className="ghost-button" type="button" onClick={handleSaveCurrentBrainView}>
+                        Save cognitive view
+                      </button>
+                    ) : null}
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      onClick={() => openExploreTab(activeExploreLane, exploreTabIdForView(activeExploreLane, "notes"))}
+                    >
+                      {activeExploreLane === "digital-brain" ? "Open selected memory" : "Open selected notes"}
+                    </button>
+                  </div>
                 </div>
                 <Suspense
                   fallback={(
@@ -2625,8 +3753,34 @@ export default function App() {
                   <GraphMap
                     graph={activeExploreLane === "digital-brain" ? digitalBrainFocusGraph : activeResult?.graph}
                     onSelectNode={selectGraphNode}
+                    onAddNodeToCanvas={handleAddGraphNodeToCanvas}
                   />
                 </Suspense>
+                {activeExploreLane === "digital-brain" ? (
+                  <div className="preview-stack">
+                    {selectedFocusNode ? (
+                      <section className="artifact-note">
+                        <strong>{selectedFocusNode.label}</strong>
+                        <span>{selectedFocusNode.summary || "No summary yet."}</span>
+                        <span>Confidence: {selectedFocusNode.confidence != null ? selectedFocusNode.confidence.toFixed(2) : "n/a"}</span>
+                        {(selectedFocusNode.why_surfaced || []).map((reason) => (
+                          <span key={`${selectedFocusNode.id}-${reason}`}>{reason}</span>
+                        ))}
+                      </section>
+                    ) : (
+                      <section className="artifact-note">
+                        <strong>Why this is shown</strong>
+                        <span>Select a node in Focus to see the current surfacing reasons and confidence.</span>
+                      </section>
+                    )}
+                    {digitalBrainViewRecommendations.length ? (
+                      <section className="artifact-note">
+                        <strong>Suggested cognitive views</strong>
+                        <span>{digitalBrainViewRecommendations.map((item) => item.label).join(", ")}</span>
+                      </section>
+                    ) : null}
+                  </div>
+                ) : null}
               </section>
             ) : (
               <EmptyTabState
@@ -2671,6 +3825,95 @@ export default function App() {
                     </ul>
                   </section>
                 ) : null}
+                {activeExploreLane === "digital-brain" && digitalBrainWorkingSeeds.length ? (
+                  <section className="panel">
+                    <div className="panel__header">
+                      <div>
+                        <span className="eyebrow">Promoted cognitive records</span>
+                        <h3>Canvas scopes promoted into memory, topic, and task records</h3>
+                      </div>
+                    </div>
+                    <ul className="compact-list">
+                      {digitalBrainWorkingSeeds.map((bookmark) => (
+                        <li key={bookmark.id}>
+                          <button className="quick-result" type="button" onClick={() => selectDigitalBrainRecord(bookmark)}>
+                            <strong>{bookmark.title}</strong>
+                            <span>{bookmark.kind} • {bookmark.selected_files?.length ?? 0} files</span>
+                            <em>{bookmark.snapshot_bundle_label || "No snapshot linked yet"}</em>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                ) : null}
+                {activeExploreLane === "digital-brain" && selectedBrainRecord && selectedBrainRecord.kind !== "decision" ? (
+                  <section className="panel">
+                    <div className="panel__header">
+                      <div>
+                        <span className="eyebrow">Cognitive record review</span>
+                        <h3>{selectedBrainRecord.title}</h3>
+                      </div>
+                    </div>
+                    <div className="field-grid">
+                      <label className="field-grid__wide">
+                        <span>Summary</span>
+                        <textarea
+                          rows="4"
+                          value={selectedBrainRecord.summary || ""}
+                          onChange={(event) => handleUpdateDigitalBrainRecord(selectedBrainRecord, { summary: event.target.value })}
+                        />
+                      </label>
+                      <label>
+                        <span>Review status</span>
+                        <select
+                          value={selectedBrainRecord.review_status || "new"}
+                          onChange={(event) => handleUpdateDigitalBrainRecord(selectedBrainRecord, { review_status: event.target.value })}
+                        >
+                          <option value="new">New</option>
+                          <option value="reviewed">Reviewed</option>
+                          <option value="approved">Approved</option>
+                        </select>
+                      </label>
+                      <label>
+                        <span>Confidence</span>
+                        <input
+                          type="number"
+                          min="0"
+                          max="1"
+                          step="0.01"
+                          value={selectedBrainRecord.confidence ?? 0.72}
+                          onChange={(event) => handleUpdateDigitalBrainRecord(selectedBrainRecord, { confidence: Number(event.target.value) || 0 })}
+                        />
+                      </label>
+                      <label className="field-grid__wide">
+                        <span>Provenance notes</span>
+                        <textarea
+                          rows="4"
+                          value={selectedBrainRecord.provenance_notes || ""}
+                          onChange={(event) => handleUpdateDigitalBrainRecord(selectedBrainRecord, { provenance_notes: event.target.value })}
+                        />
+                      </label>
+                    </div>
+                    <div className="artifact-note">
+                      <strong>Source scope</strong>
+                      <span>{selectedBrainRecord.source_scope_label || "Unknown scope"}</span>
+                      <span>{selectedBrainRecord.selected_files?.length ?? 0} files</span>
+                      <span>{selectedBrainRecord.snapshot_bundle_label || "No snapshot linked yet"}</span>
+                      <span>{selectedBrainRecord.kind}</span>
+                      {selectedBrainRecord.selected_files?.slice(0, 5).map((pathValue) => (
+                        <span key={`${selectedBrainRecord.id}-${pathValue}`}>Evidence: {pathValue}</span>
+                      ))}
+                    </div>
+                    <div className="hero__actions hero__actions--tight">
+                      <button className="secondary-button" type="button" onClick={() => handleUpdateDigitalBrainRecord(selectedBrainRecord, { review_status: "approved" })}>
+                        Approve record
+                      </button>
+                      <button className="ghost-button" type="button" onClick={() => handleDeleteDigitalBrainRecord(selectedBrainRecord)}>
+                        Delete record
+                      </button>
+                    </div>
+                  </section>
+                ) : null}
                 <section className="notes-grid">
                   <ExplorerPane
                     tree={tree}
@@ -2679,6 +3922,14 @@ export default function App() {
                     onToggle={toggleNode}
                     onSelect={selectFile}
                     onOpenQuickSwitcher={() => setQuickOpen(true)}
+                    filters={NOTES_FILTERS}
+                    activeFilter={notesFilter}
+                    onFilterChange={setNotesFilter}
+                    onDragFileStart={(event, file) => {
+                      event.dataTransfer.setData("application/context-vault-file", JSON.stringify(file));
+                      event.dataTransfer.effectAllowed = "copy";
+                    }}
+                    onSendToCanvas={handleSendFileToCanvas}
                   />
                   <PreviewPane
                     selectedFile={selectedFile}
@@ -2689,6 +3940,7 @@ export default function App() {
                     outgoing={outgoingLinks}
                     onSaveFile={handleSaveFile}
                     onBookmarkFile={handleBookmarkFile}
+                    onSendToCanvas={handleSendFileToCanvas}
                   />
                 </section>
               </>
@@ -2714,13 +3966,41 @@ export default function App() {
             <LaneHeader lane={activeExploreLane} actions={structureActions} />
             <CanvasBoard
               canvases={canvases}
+              templates={canvasTemplates}
+              currentLane={activeExploreLane}
               selectedCanvasId={selectedCanvasId}
               onSelectCanvas={setSelectedCanvasId}
               onCreateCanvas={handleCreateCanvas}
+              onCreateCanvasFromTemplate={handleCreateCanvasFromTemplate}
+              onCreateCanvasFromSavedTemplate={handleCreateCanvasFromSavedTemplate}
+              onImportCanvasBoard={handleImportCanvasBoard}
               onSaveCanvas={handleSaveCanvas}
-              onAddFileCard={handleAddFileCard}
-              onAddTextCard={handleAddTextCard}
+              onSaveCanvasState={handleSaveCanvasState}
+              onSaveCanvasAsTemplate={handleSaveCanvasAsTemplate}
+              onUpdateCanvasTemplateFromCanvas={handleUpdateCanvasTemplateFromCanvas}
+              onDeleteCanvasTemplate={handleDeleteCanvasTemplate}
+              onDeleteCanvas={handleDeleteCanvas}
+              onDuplicateCanvas={handleDuplicateCanvas}
+              onExportCanvasBoard={handleExportCanvasBoard}
+              onOpenFile={handleOpenCanvasFile}
+              onRunLogicScope={handleRunLogicProfile}
+              onExplainScope={handleCreateExplainBundle}
+              onUseScopeInBuild={handleUseCanvasScopeInBuild}
+              onCreatePatchPreviewScope={handleCreatePatchPreview}
+              onSaveScope={handleSaveCanvasScope}
+              onSaveScopeAsPreset={handleSaveCanvasScopeAsPreset}
+              onPromoteScope={handlePromoteCanvasScope}
               selectedFile={selectedFile}
+              files={files}
+              recentFiles={recentFiles}
+              bookmarkFiles={bookmarkFiles}
+              canvasSnapshots={snapshots.filter((item) => item.kind === "canvas_state" && item.content?.canvas?.id === selectedCanvasId)}
+              onRestoreCanvasSnapshot={handleRestoreSnapshot}
+              historyTimeline={historyTimeline}
+              buildPatchPreviews={buildPatchPreviews}
+              buildApplyRuns={buildApplyRuns}
+              linkedBrainRecords={digitalBrainRecords}
+              onOpenDigitalBrainRecord={selectDigitalBrainRecord}
             />
           </>
         ) : null}
@@ -2811,6 +4091,94 @@ export default function App() {
                   </p>
                 )}
               </section>
+              {activeExploreLane === "digital-brain" && digitalBrainDecisionSeeds.length ? (
+                <section className="panel">
+                  <div className="panel__header">
+                    <div>
+                      <span className="eyebrow">Promoted decision seeds</span>
+                      <h3>Canvas scopes promoted into Digital Brain decisions</h3>
+                    </div>
+                  </div>
+                  <ul className="compact-list">
+                    {digitalBrainDecisionSeeds.map((bookmark) => (
+                      <li key={bookmark.id}>
+                        <button className="quick-result" type="button" onClick={() => selectDigitalBrainRecord(bookmark)}>
+                          <strong>{bookmark.title}</strong>
+                          <span>{bookmark.selected_files?.length ?? 0} files</span>
+                          <em>{bookmark.snapshot_bundle_label || "No snapshot linked yet"}</em>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
+              {activeExploreLane === "digital-brain" && selectedBrainRecord?.kind === "decision" ? (
+                <section className="panel">
+                  <div className="panel__header">
+                    <div>
+                      <span className="eyebrow">Decision review</span>
+                      <h3>{selectedBrainRecord.title}</h3>
+                    </div>
+                  </div>
+                  <div className="field-grid">
+                    <label className="field-grid__wide">
+                      <span>Summary</span>
+                      <textarea
+                        rows="4"
+                        value={selectedBrainRecord.summary || ""}
+                        onChange={(event) => handleUpdateDigitalBrainRecord(selectedBrainRecord, { summary: event.target.value })}
+                      />
+                    </label>
+                    <label>
+                      <span>Review status</span>
+                      <select
+                        value={selectedBrainRecord.review_status || "new"}
+                        onChange={(event) => handleUpdateDigitalBrainRecord(selectedBrainRecord, { review_status: event.target.value })}
+                      >
+                        <option value="new">New</option>
+                        <option value="reviewed">Reviewed</option>
+                        <option value="approved">Approved</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>Confidence</span>
+                      <input
+                        type="number"
+                        min="0"
+                        max="1"
+                        step="0.01"
+                        value={selectedBrainRecord.confidence ?? 0.72}
+                        onChange={(event) => handleUpdateDigitalBrainRecord(selectedBrainRecord, { confidence: Number(event.target.value) || 0 })}
+                      />
+                    </label>
+                    <label className="field-grid__wide">
+                      <span>Provenance notes</span>
+                      <textarea
+                        rows="4"
+                        value={selectedBrainRecord.provenance_notes || ""}
+                        onChange={(event) => handleUpdateDigitalBrainRecord(selectedBrainRecord, { provenance_notes: event.target.value })}
+                      />
+                    </label>
+                  </div>
+                  <div className="artifact-note">
+                    <strong>Source scope</strong>
+                    <span>{selectedBrainRecord.source_scope_label || "Unknown scope"}</span>
+                    <span>{selectedBrainRecord.selected_files?.length ?? 0} files</span>
+                    <span>{selectedBrainRecord.snapshot_bundle_label || "No snapshot linked yet"}</span>
+                    {selectedBrainRecord.selected_files?.slice(0, 5).map((pathValue) => (
+                      <span key={`${selectedBrainRecord.id}-${pathValue}`}>Evidence: {pathValue}</span>
+                    ))}
+                  </div>
+                  <div className="hero__actions hero__actions--tight">
+                    <button className="secondary-button" type="button" onClick={() => handleUpdateDigitalBrainRecord(selectedBrainRecord, { review_status: "approved" })}>
+                      Approve decision
+                    </button>
+                    <button className="ghost-button" type="button" onClick={() => handleDeleteDigitalBrainRecord(selectedBrainRecord)}>
+                      Delete decision
+                    </button>
+                  </div>
+                </section>
+              ) : null}
               <section className="panel">
                 <div className="panel__header">
                   <div>
@@ -2834,6 +4202,43 @@ export default function App() {
           <>
             <LaneHeader lane={activeExploreLane} actions={structureActions} />
             <section className="vault-layout">
+              {activeExploreLane === "digital-brain" ? (
+                <section className="panel">
+                  <div className="panel__header panel__header--spread">
+                    <div>
+                      <span className="eyebrow">Saved cognitive views</span>
+                      <h3>Reusable Focus views and record anchors</h3>
+                    </div>
+                    <button className="secondary-button" type="button" onClick={handleSaveCurrentBrainView}>
+                      Save current view
+                    </button>
+                  </div>
+                  {digitalBrainViewBookmarks.length ? (
+                    <ul className="compact-list">
+                      {digitalBrainViewBookmarks.map((bookmark) => (
+                        <li key={bookmark.id}>
+                          <strong>{bookmark.label}</strong>
+                          <span>{bookmark.metadata?.node_count ?? 0} nodes</span>
+                          <span>{bookmark.metadata?.focus_node_label || bookmark.metadata?.anchor_file_rel_path || "Saved focus"}</span>
+                          <div className="hero__actions hero__actions--tight">
+                            <button className="secondary-button" type="button" onClick={() => selectBookmark(bookmark)}>
+                              Open view
+                            </button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="empty-copy">No saved cognitive views yet.</p>
+                  )}
+                  {digitalBrainViewRecommendations.length ? (
+                    <div className="artifact-note">
+                      <strong>Suggested next views</strong>
+                      <span>{digitalBrainViewRecommendations.map((item) => item.label).join(", ")}</span>
+                    </div>
+                  ) : null}
+                </section>
+              ) : null}
               <section className="panel">
                 <div className="panel__header">
                   <div>
@@ -2852,6 +4257,91 @@ export default function App() {
                   </ul>
                 ) : (
                   <p className="empty-copy">No saved graph snapshots yet.</p>
+                )}
+              </section>
+              <section className="panel">
+                <div className="panel__header">
+                  <div>
+                    <span className="eyebrow">Saved scopes</span>
+                    <h3>Reusable canvas scopes</h3>
+                  </div>
+                </div>
+                {canvasScopeBookmarks.length ? (
+                  <ul className="compact-list">
+                    {canvasScopeBookmarks.map((bookmark) => (
+                      <li key={bookmark.id}>
+                        <strong>{bookmark.label}</strong>
+                        <span>{bookmark.metadata?.selected_files?.length ?? 0} files</span>
+                        {bookmark.metadata?.snapshot_label ? <span>{bookmark.metadata.snapshot_label}</span> : null}
+                        <div className="hero__actions hero__actions--tight">
+                          <button className="secondary-button" type="button" onClick={() => selectBookmark(bookmark)}>
+                            Open scope
+                          </button>
+                          <button className="ghost-button" type="button" onClick={() => handleUseCanvasScopeInBuild(bookmark.metadata || {})}>
+                            Use in Build
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="empty-copy">No saved canvas scopes yet.</p>
+                )}
+              </section>
+              <section className="panel">
+                <div className="panel__header">
+                  <div>
+                    <span className="eyebrow">Scope comparison</span>
+                    <h3>Compare two saved scopes</h3>
+                  </div>
+                </div>
+                {canvasScopeBookmarks.length >= 2 ? (
+                  <>
+                    <div className="field-grid">
+                      <label>
+                        <span>Left scope</span>
+                        <select value={scopeCompareLeftId} onChange={(event) => setScopeCompareLeftId(event.target.value)}>
+                          <option value="">Choose scope</option>
+                          {canvasScopeBookmarks.map((bookmark) => (
+                            <option key={bookmark.id} value={bookmark.id}>
+                              {bookmark.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        <span>Right scope</span>
+                        <select value={scopeCompareRightId} onChange={(event) => setScopeCompareRightId(event.target.value)}>
+                          <option value="">Choose scope</option>
+                          {canvasScopeBookmarks.map((bookmark) => (
+                            <option key={bookmark.id} value={bookmark.id}>
+                              {bookmark.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                    {scopeComparison ? (
+                      <div className="artifact-note">
+                        <strong>
+                          {scopeComparison.added.length} added, {scopeComparison.removed.length} removed, {scopeComparison.shared.length} shared
+                        </strong>
+                        <span>Added: {scopeComparison.added.slice(0, 8).join(", ") || "None"}</span>
+                        <span>Removed: {scopeComparison.removed.slice(0, 8).join(", ") || "None"}</span>
+                        <span>Shared: {scopeComparison.shared.slice(0, 8).join(", ") || "None"}</span>
+                        <span>Added cards: {scopeComparison.addedCards.slice(0, 8).join(", ") || "None"}</span>
+                        <span>Removed cards: {scopeComparison.removedCards.slice(0, 8).join(", ") || "None"}</span>
+                        <span>Note-card delta: {scopeComparison.noteCardDelta}</span>
+                        <span>Group-card delta: {scopeComparison.groupCardDelta}</span>
+                        <span>Link delta: {scopeComparison.linkDelta}</span>
+                        <span>Build goal changed: {scopeComparison.buildGoalChanged ? "Yes" : "No"}</span>
+                      </div>
+                    ) : (
+                      <p className="empty-copy">Choose two saved scopes to compare their selected files.</p>
+                    )}
+                  </>
+                ) : (
+                  <p className="empty-copy">Save at least two canvas scopes to compare them here.</p>
                 )}
               </section>
               <section className="panel">
@@ -3162,6 +4652,62 @@ export default function App() {
                       Create patch preview
                     </button>
                   </div>
+                  {activeBuildScopeChecks.length ? (
+                    <div className="artifact-note">
+                      <strong>Canvas review checks</strong>
+                      {activeBuildScopeChecks.map((item) => (
+                        <span key={item.id}>{item.pass ? "Ready" : "Missing"}: {item.label}</span>
+                      ))}
+                    </div>
+                  ) : null}
+                </section>
+                <section className="panel">
+                  <div className="panel__header">
+                    <div>
+                      <span className="eyebrow">Canvas-derived scope</span>
+                      <h3>Choose the board scope Build should use</h3>
+                    </div>
+                  </div>
+                  {activeBuildScope ? (
+                    <div className="artifact-note">
+                      <strong>{activeBuildScope.label}</strong>
+                      <span>{activeBuildScope.selected_files?.length ?? 0} files</span>
+                      <span>{activeBuildScope.description || "Active canvas-derived scope"}</span>
+                      {activeBuildScope.build_goal ? <span>Board goal: {activeBuildScope.build_goal}</span> : null}
+                      {activeBuildScope.allowed_targets?.length ? <span>Allowed targets: {activeBuildScope.allowed_targets.join(", ")}</span> : null}
+                      {activeBuildScope.forbidden_paths?.length ? <span>Forbidden paths: {activeBuildScope.forbidden_paths.join(", ")}</span> : null}
+                    </div>
+                  ) : (
+                    <p className="empty-copy">No active canvas scope yet. Use Canvas, Saved scopes, or the buttons below.</p>
+                  )}
+                  <div className="hero__actions hero__actions--tight">
+                    <button className="ghost-button" type="button" onClick={() => setActiveBuildScope(null)}>
+                      Clear active scope
+                    </button>
+                    {activeBuildScope ? (
+                      <button className="ghost-button" type="button" onClick={() => handleSaveCanvasScopeAsPreset(activeBuildScope)}>
+                        Save active scope as preset
+                      </button>
+                    ) : null}
+                  </div>
+                  {canvasScopeBookmarks.length ? (
+                    <ul className="compact-list">
+                      {canvasScopeBookmarks.slice(0, 8).map((bookmark) => (
+                        <li key={bookmark.id}>
+                          <strong>{bookmark.label}</strong>
+                          <span>{bookmark.metadata?.selected_files?.length ?? 0} files</span>
+                          <div className="hero__actions hero__actions--tight">
+                            <button className="secondary-button" type="button" onClick={() => handleUseCanvasScopeInBuild(bookmark.metadata || {})}>
+                              Use this scope
+                            </button>
+                            <button className="ghost-button" type="button" onClick={() => selectBookmark(bookmark)}>
+                              Open in Canvas
+                            </button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
                 </section>
                 <section className="panel">
                   <div className="panel__header">
@@ -3176,6 +4722,23 @@ export default function App() {
                     <MetricCard label="Explain" value={explainBundles.length} hint={latestExplainBundle?.label || "No explain bundle yet"} />
                     <MetricCard label="Build pieces" value={buildPiecesDraft.split(",").map((item) => item.trim()).filter(Boolean).length} hint="Selected pieces" />
                   </div>
+                  {activeBuildScope ? (
+                    <div className="artifact-note">
+                      <strong>Active canvas scope</strong>
+                      <span>
+                        {activeBuildScope.label} with {activeBuildScope.selected_files.length} selected file
+                        {activeBuildScope.selected_files.length === 1 ? "" : "s"}.
+                      </span>
+                      <span>{activeBuildScope.description}</span>
+                      {activeBuildScope.build_goal ? <span>Board goal: {activeBuildScope.build_goal}</span> : null}
+                      {activeBuildScope.review_notes ? <span>Review notes: {activeBuildScope.review_notes}</span> : null}
+                      <div className="hero__actions hero__actions--tight">
+                        <button className="ghost-button" type="button" onClick={() => setActiveBuildScope(null)}>
+                          Clear build scope
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
                 </section>
               </section>
             ) : null}
@@ -3194,6 +4757,18 @@ export default function App() {
                         <strong>{latestPatchPreview.label}</strong>
                         <span>{latestPatchPreview.copied_file_count} scoped inputs</span>
                       </li>
+                      {latestPatchPreview.canvas_label ? (
+                        <li>
+                          <strong>Canvas</strong>
+                          <span>{latestPatchPreview.canvas_label}</span>
+                        </li>
+                      ) : null}
+                      {latestPatchPreview.scope_label ? (
+                        <li>
+                          <strong>Scope</strong>
+                          <span>{latestPatchPreview.scope_label}</span>
+                        </li>
+                      ) : null}
                       <li>
                         <strong>Warnings</strong>
                         <span>{latestPatchPreview.warning_count}</span>

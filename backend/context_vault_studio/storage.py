@@ -22,6 +22,7 @@ BOOKMARKS_PATH = STATE_DIR / "bookmarks.json"
 LAYOUT_PATH = STATE_DIR / "layout.json"
 SNAPSHOTS_PATH = STATE_DIR / "snapshots.json"
 CANVASES_PATH = STATE_DIR / "canvases.json"
+CANVAS_TEMPLATES_PATH = STATE_DIR / "canvas_templates.json"
 SNAPSHOT_BUNDLES_PATH = STATE_DIR / "snapshot_bundles.json"
 SNAPSHOT_BUNDLES_DIR = STATE_DIR / "snapshot_bundles"
 BUILD_PATCH_PREVIEWS_PATH = STATE_DIR / "build_patch_previews.json"
@@ -39,6 +40,7 @@ EXPLAIN_BUNDLES_DIR = STATE_DIR / "explain_bundles"
 FILE_ANALYSIS_CACHE_PATH = STATE_DIR / "file_analysis_cache.json"
 DIGITAL_BRAIN_INDEXES_PATH = STATE_DIR / "digital_brain_indexes.json"
 DIGITAL_BRAIN_INDEXES_DIR = STATE_DIR / "digital_brain_indexes"
+DIGITAL_BRAIN_RECORDS_PATH = STATE_DIR / "digital_brain_records.json"
 STARTER_CONFIG_PATH = REPO_ROOT / "configs" / "starter_workspace.json"
 GUIDED_DEMO_CONFIG_PATH = REPO_ROOT / "configs" / "guided_demo.json"
 LOCAL_NEUTRON_EXAMPLE_PATH = REPO_ROOT / "config" / "neutron_curated.example.json"
@@ -89,6 +91,11 @@ def _canonicalize_config(config: dict | None) -> dict | None:
         "blocked_patterns": sorted(access.get("blocked_patterns", [])),
         "enforce_copy_mode": bool(access.get("enforce_copy_mode", True)),
     }
+    global_exclusions = normalized.get("global_exclusions", {})
+    normalized["global_exclusions"] = {
+        "blocked_paths": sorted(global_exclusions.get("blocked_paths", [])),
+        "blocked_patterns": sorted(global_exclusions.get("blocked_patterns", [])),
+    }
     normalized["default_exclude"] = sorted(normalized.get("default_exclude", []))
     normalized["default_include"] = sorted(normalized.get("default_include", []))
     digital_brain = normalized.get("digital_brain", {})
@@ -97,6 +104,10 @@ def _canonicalize_config(config: dict | None) -> dict | None:
         "graph_density": digital_brain.get("graph_density", "balanced"),
         "enrichment_mode": digital_brain.get("enrichment_mode", "background"),
         "retention_mode": digital_brain.get("retention_mode", "extracted_text"),
+        "workspace_file_sync_policy": digital_brain.get("workspace_file_sync_policy", "metadata_then_focus"),
+        "notes_sync_policy": digital_brain.get("notes_sync_policy", "metadata_then_focus"),
+        "chat_sync_policy": digital_brain.get("chat_sync_policy", "planned"),
+        "recent_activity_sync_policy": digital_brain.get("recent_activity_sync_policy", "ranking_only"),
         "prioritize_recent_files": bool(digital_brain.get("prioritize_recent_files", True)),
         "include_notes": bool(digital_brain.get("include_notes", True)),
         "include_chats": bool(digital_brain.get("include_chats", True)),
@@ -369,6 +380,10 @@ def save_build_patch_preview(payload: dict) -> dict:
         source_key = key.replace("_file", "")
         path.write_text(json.dumps(payload.get(source_key, {}), indent=2) + "\n", encoding="utf-8")
 
+    task_packet = payload.get("task_packet", {}) or {}
+    scope = task_packet.get("scope", {}) or {}
+    task_metadata = task_packet.get("metadata", {}) or {}
+
     record = {
         "id": preview_id,
         "created_at": created_at,
@@ -379,6 +394,10 @@ def save_build_patch_preview(payload: dict) -> dict:
         "warning_count": int(payload.get("warning_count", 0)),
         "error_count": int(payload.get("error_count", 0)),
         "copied_file_count": int(payload.get("copied_file_count", 0)),
+        "canvas_id": task_metadata.get("canvas_id"),
+        "canvas_label": task_metadata.get("canvas_label"),
+        "scope_label": task_metadata.get("scope_label"),
+        "selected_file_count": len(scope.get("selected_files", [])),
     }
 
     current = load_build_patch_previews()
@@ -442,6 +461,10 @@ def save_build_apply_run(payload: dict) -> dict:
         "preview_id": payload.get("preview_id"),
         "rollback_dir": payload.get("rollback_dir"),
         "scratch_apply_dir": payload.get("scratch_apply_dir"),
+        "canvas_id": payload.get("canvas_id"),
+        "canvas_label": payload.get("canvas_label"),
+        "scope_label": payload.get("scope_label"),
+        "selected_file_count": int(payload.get("selected_file_count", 0)),
     }
 
     current = load_build_apply_runs()
@@ -739,6 +762,8 @@ def load_canvases() -> list[dict]:
             "description": "Default board for linking important files and ideas.",
             "cards": [],
             "edges": [],
+            "viewport": {"x": 0, "y": 0, "zoom": 1},
+            "metadata": {},
             "created_at": _now_iso(),
             "updated_at": _now_iso(),
         }
@@ -779,6 +804,45 @@ def delete_canvas(canvas_id: str) -> None:
     save_canvases([canvas for canvas in load_canvases() if canvas["id"] != canvas_id])
 
 
+def load_canvas_templates() -> list[dict]:
+    payload = _read_json(CANVAS_TEMPLATES_PATH)
+    return payload if isinstance(payload, list) else []
+
+
+def save_canvas_templates(templates: list[dict]) -> None:
+    _write_json(CANVAS_TEMPLATES_PATH, templates)
+
+
+def upsert_canvas_template(*, template_id: str | None, payload: dict) -> dict:
+    templates = load_canvas_templates()
+    now = _now_iso()
+    target_id = template_id or str(uuid.uuid4())
+    replacement = {
+        "id": target_id,
+        "created_at": now,
+        "updated_at": now,
+        **payload,
+    }
+
+    next_templates: list[dict] = []
+    found = False
+    for template in templates:
+        if template["id"] == target_id:
+            replacement["created_at"] = template.get("created_at", now)
+            next_templates.append(replacement)
+            found = True
+        else:
+            next_templates.append(template)
+    if not found:
+        next_templates.append(replacement)
+    save_canvas_templates(next_templates)
+    return replacement
+
+
+def delete_canvas_template(template_id: str) -> None:
+    save_canvas_templates([template for template in load_canvas_templates() if template["id"] != template_id])
+
+
 def load_workspace_config() -> dict:
     saved = _read_json(WORKSPACE_CONFIG_PATH)
     if isinstance(saved, dict):
@@ -797,11 +861,29 @@ def load_workspace_config() -> dict:
             "blocked_patterns": [],
             "enforce_copy_mode": True,
         },
+        "global_exclusions": {
+            "blocked_paths": [],
+            "blocked_patterns": [
+                ".DS_Store",
+                "Thumbs.db",
+                ".git/**",
+                ".pytest_cache/**",
+                ".ruff_cache/**",
+                ".venv/**",
+                ".vscode/**",
+                "__pycache__/**",
+                "node_modules/**",
+            ],
+        },
         "digital_brain": {
             "scan_mode": "quick_start",
             "graph_density": "balanced",
             "enrichment_mode": "background",
             "retention_mode": "extracted_text",
+            "workspace_file_sync_policy": "metadata_then_focus",
+            "notes_sync_policy": "metadata_then_focus",
+            "chat_sync_policy": "planned",
+            "recent_activity_sync_policy": "ranking_only",
             "prioritize_recent_files": True,
             "include_notes": True,
             "include_chats": True,
@@ -907,3 +989,51 @@ def attach_digital_brain_index(result: dict) -> dict | None:
     record = save_digital_brain_index(payload)
     result["digital_brain_index"] = record
     return record
+
+
+def load_digital_brain_records() -> list[dict]:
+    payload = _read_json(DIGITAL_BRAIN_RECORDS_PATH)
+    return payload if isinstance(payload, list) else []
+
+
+def save_digital_brain_records(records: list[dict]) -> None:
+    _write_json(DIGITAL_BRAIN_RECORDS_PATH, records)
+
+
+def add_digital_brain_record(payload: dict) -> dict:
+    records = load_digital_brain_records()
+    record = {
+        "id": payload.get("id") or f"digital-brain-record-{uuid.uuid4().hex[:8]}",
+        "created_at": payload.get("created_at") or _now_iso(),
+        "updated_at": payload.get("updated_at") or _now_iso(),
+        **payload,
+    }
+    records.insert(0, record)
+    save_digital_brain_records(records[:240])
+    return record
+
+
+def update_digital_brain_record(record_id: str, payload: dict) -> dict | None:
+    records = load_digital_brain_records()
+    updated: dict | None = None
+    next_records: list[dict] = []
+    for record in records:
+      if record.get("id") == record_id:
+        updated = {
+            **record,
+            **payload,
+            "id": record_id,
+            "created_at": record.get("created_at", _now_iso()),
+            "updated_at": _now_iso(),
+        }
+        next_records.append(updated)
+      else:
+        next_records.append(record)
+    if not updated:
+      return None
+    save_digital_brain_records(next_records[:240])
+    return updated
+
+
+def delete_digital_brain_record(record_id: str) -> None:
+    save_digital_brain_records([record for record in load_digital_brain_records() if record.get("id") != record_id])

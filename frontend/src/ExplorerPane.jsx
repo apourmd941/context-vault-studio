@@ -1,17 +1,24 @@
-function TreeNode({ node, depth, expanded, onToggle, selectedId, onSelect }) {
+function TreeNode({ node, depth, expanded, onToggle, selectedId, onSelect, onDragFileStart, onSendToCanvas }) {
   const isOpen = expanded.has(node.id);
   const isSelected = selectedId === node.id;
 
   if (node.kind === "file") {
     return (
-      <button
-        type="button"
-        className={`tree-node tree-node--file ${isSelected ? "tree-node--selected" : ""}`}
-        style={{ paddingLeft: `${16 + depth * 14}px` }}
-        onClick={() => onSelect(node.file)}
-      >
-        <span>{node.name}</span>
-      </button>
+      <div className={`tree-node-row ${isSelected ? "tree-node-row--selected" : ""}`}>
+        <button
+          type="button"
+          className={`tree-node tree-node--file ${isSelected ? "tree-node--selected" : ""}`}
+          style={{ paddingLeft: `${16 + depth * 14}px` }}
+          onClick={() => onSelect(node.file)}
+          draggable
+          onDragStart={(event) => onDragFileStart?.(event, node.file)}
+        >
+          <span>{node.name}</span>
+        </button>
+        <button className="ghost-button tree-node-action" type="button" onClick={() => onSendToCanvas?.(node.file)}>
+          To canvas
+        </button>
+      </div>
     );
   }
 
@@ -32,13 +39,15 @@ function TreeNode({ node, depth, expanded, onToggle, selectedId, onSelect }) {
               key={child.id}
               node={child}
               depth={depth + 1}
-              expanded={expanded}
-              onToggle={onToggle}
-              selectedId={selectedId}
-              onSelect={onSelect}
-            />
-          ))
-        : null}
+            expanded={expanded}
+            onToggle={onToggle}
+            selectedId={selectedId}
+            onSelect={onSelect}
+            onDragFileStart={onDragFileStart}
+            onSendToCanvas={onSendToCanvas}
+          />
+        ))
+      : null}
     </div>
   );
 }
@@ -51,6 +60,11 @@ export default function ExplorerPane({
   onToggle,
   onSelect,
   onOpenQuickSwitcher,
+  filters,
+  activeFilter,
+  onFilterChange,
+  onDragFileStart,
+  onSendToCanvas,
 }) {
   return (
     <section className="panel panel--tight">
@@ -63,6 +77,20 @@ export default function ExplorerPane({
           Quick switcher
         </button>
       </div>
+      {filters?.length ? (
+        <div className="explorer-filter-row">
+          {filters.map((filter) => (
+            <button
+              key={filter.id}
+              type="button"
+              className={`canvas-tab ${activeFilter === filter.id ? "canvas-tab--active" : ""}`}
+              onClick={() => onFilterChange?.(filter.id)}
+            >
+              {filter.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <div className="tree-scroll">
         {tree.length ? (
           tree.map((node) => (
@@ -74,6 +102,8 @@ export default function ExplorerPane({
               onToggle={onToggle}
               selectedId={selectedId}
               onSelect={onSelect}
+              onDragFileStart={onDragFileStart}
+              onSendToCanvas={onSendToCanvas}
             />
           ))
         ) : (

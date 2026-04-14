@@ -148,13 +148,33 @@ def resolve_config_paths(config: dict, *, base_dir: Path) -> dict:
     access.setdefault("blocked_paths", [])
     access.setdefault("blocked_patterns", [])
     access.setdefault("enforce_copy_mode", True)
+    global_exclusions = normalized.setdefault("global_exclusions", {})
+    global_exclusions.setdefault("blocked_paths", [])
+    global_exclusions.setdefault("blocked_patterns", [])
     access["allowed_roots"] = [
         resolve_path_value(value, base_dir=base_dir) for value in access.get("allowed_roots", [])
     ]
     access["blocked_paths"] = [
         resolve_path_value(value, base_dir=base_dir) for value in access.get("blocked_paths", [])
     ]
+    global_exclusions["blocked_paths"] = [
+        resolve_path_value(value, base_dir=base_dir) for value in global_exclusions.get("blocked_paths", [])
+    ]
     return normalized
+
+
+def merged_access_policy(normalized: dict) -> dict:
+    access = deepcopy(normalized.get("access", {}))
+    global_exclusions = normalized.get("global_exclusions", {})
+    access["blocked_paths"] = [
+        *access.get("blocked_paths", []),
+        *global_exclusions.get("blocked_paths", []),
+    ]
+    access["blocked_patterns"] = [
+        *global_exclusions.get("blocked_patterns", []),
+        *access.get("blocked_patterns", []),
+    ]
+    return access
 
 
 def path_is_within(path: Path, candidate_root: Path) -> bool:
@@ -383,6 +403,12 @@ def copy_or_link(source_file: Path, dest_file: Path, mode: str) -> None:
             dest_file.unlink()
         dest_file.symlink_to(source_file)
         return
+    if dest_file.exists() or dest_file.is_symlink():
+        try:
+            dest_file.chmod(0o666)
+        except OSError:
+            pass
+        dest_file.unlink()
     shutil.copy2(source_file, dest_file)
 
 
@@ -955,7 +981,7 @@ def build_snapshot_bundle_payload(
         summary=summary,
         source_summaries=source_summaries,
         feature_clusters=feature_clusters,
-        access=normalized.get("access", {}),
+        access=merged_access_policy(normalized),
     )
     sources = normalized.get("sources", [])
 
@@ -988,7 +1014,7 @@ def build_snapshot_bundle_payload(
         "feature_clusters": feature_clusters,
         "architecture_summary": architecture_summary,
         "policy_bundle": {
-            "access": normalized.get("access", {}),
+            "access": merged_access_policy(normalized),
             "default_mode": normalized.get("default_mode", "copy"),
             "default_include": normalized.get("default_include", []),
             "default_exclude": normalized.get("default_exclude", []),
@@ -1032,7 +1058,7 @@ def build_workspace_from_config(
         "exclude": normalized.get("default_exclude", DEFAULT_EXCLUDES),
         "include": normalized.get("default_include", []),
         "max_file_size_bytes": int(normalized.get("max_file_size_bytes", 5_000_000)),
-        "access": normalized.get("access", {}),
+        "access": merged_access_policy(normalized),
     }
     source_specs = normalized.get("sources", [])
     if not source_specs:
@@ -1330,7 +1356,7 @@ def build_workspace_from_config(
 
         if not dry_run:
             mode = (source.get("mode") or normalized.get("default_mode", "copy")).lower()
-            if normalized.get("access", {}).get("enforce_copy_mode", True):
+            if merged_access_policy(normalized).get("enforce_copy_mode", True):
                 mode = "copy"
             if mode not in {"copy", "symlink"}:
                 raise ValueError(f"Unsupported mode for {source['name']}: {mode}")
@@ -1349,11 +1375,15 @@ def build_workspace_from_config(
             source = result["source"]
             summary = result["summary"]
             mode = result["output_mode"]
+            source_slug = slugify(source["name"])
+            source_output_root = vault_dir / "Sources" / source_slug
+            if source_output_root.exists():
+                shutil.rmtree(source_output_root)
             for record in result["records"]:
                 output_tasks.append((Path(record.original_path), vault_dir / record.mirrored_rel_path, mode))
             source_note_payloads.append(
                 (
-                    maps_dir / f"{slugify(source['name'])}.md",
+                    maps_dir / f"{source_slug}.md",
                     render_source_note(source, summary, generated_at),
                 )
             )
@@ -1481,10 +1511,10 @@ def build_workspace_from_config(
             for record in all_records
         ],
         "access": {
-            "allowed_roots": normalized.get("access", {}).get("allowed_roots", []),
-            "blocked_paths": normalized.get("access", {}).get("blocked_paths", []),
-            "blocked_patterns": normalized.get("access", {}).get("blocked_patterns", []),
-            "enforce_copy_mode": normalized.get("access", {}).get("enforce_copy_mode", True),
+            "allowed_roots": merged_access_policy(normalized).get("allowed_roots", []),
+            "blocked_paths": merged_access_policy(normalized).get("blocked_paths", []),
+            "blocked_patterns": merged_access_policy(normalized).get("blocked_patterns", []),
+            "enforce_copy_mode": merged_access_policy(normalized).get("enforce_copy_mode", True),
         },
         "dry_run": dry_run,
     }

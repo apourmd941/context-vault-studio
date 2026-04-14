@@ -4,11 +4,13 @@ from __future__ import annotations
 def build_history_timeline(
     *,
     snapshot_bundles: list[dict],
+    snapshots: list[dict],
     delta_snapshots: list[dict],
     patch_previews: list[dict],
     apply_runs: list[dict],
     logic_profiles: list[dict],
     explain_bundles: list[dict],
+    canvas_scopes: list[dict],
 ) -> list[dict]:
     timeline: list[dict] = []
 
@@ -22,6 +24,22 @@ def build_history_timeline(
                 "summary": {
                     "file_count": item.get("file_count", 0),
                     "edge_count": item.get("edge_count", 0),
+                },
+            }
+        )
+
+    for item in snapshots:
+        if item.get("kind") != "canvas_state":
+            continue
+        timeline.append(
+            {
+                "kind": "canvas_state",
+                "id": item["id"],
+                "created_at": item["created_at"],
+                "label": item.get("label") or "Canvas state",
+                "summary": {
+                    "canvas_id": item.get("content", {}).get("canvas", {}).get("id"),
+                    "snapshot_bundle_id": item.get("snapshot_bundle_id"),
                 },
             }
         )
@@ -52,6 +70,10 @@ def build_history_timeline(
                     "ready_to_apply": item.get("ready_to_apply", False),
                     "warning_count": item.get("warning_count", 0),
                     "error_count": item.get("error_count", 0),
+                    "canvas_id": item.get("canvas_id"),
+                    "canvas_label": item.get("canvas_label"),
+                    "scope_label": item.get("scope_label"),
+                    "selected_file_count": item.get("selected_file_count", 0),
                 },
             }
         )
@@ -65,6 +87,10 @@ def build_history_timeline(
                 "label": item["label"],
                 "summary": {
                     "preview_id": item.get("preview_id"),
+                    "canvas_id": item.get("canvas_id"),
+                    "canvas_label": item.get("canvas_label"),
+                    "scope_label": item.get("scope_label"),
+                    "selected_file_count": item.get("selected_file_count", 0),
                 },
             }
         )
@@ -94,6 +120,22 @@ def build_history_timeline(
                 "summary": {
                     "top_file_count": item.get("top_file_count", 0),
                     "top_symbol_count": item.get("top_symbol_count", 0),
+                },
+            }
+        )
+
+    for item in canvas_scopes:
+        metadata = item.get("metadata") or {}
+        timeline.append(
+            {
+                "kind": "canvas_scope",
+                "id": item["id"],
+                "created_at": item["created_at"],
+                "label": item["label"],
+                "summary": {
+                    "selected_file_count": len(metadata.get("selected_files", [])),
+                    "canvas_id": metadata.get("canvas_id"),
+                    "snapshot_bundle_id": metadata.get("snapshot_bundle_id"),
                 },
             }
         )

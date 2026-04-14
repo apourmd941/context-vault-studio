@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 import mimetypes
 import platform
 import re
 import subprocess
 import uuid
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -16,8 +18,11 @@ from context_vault_studio.models import (
     BookmarkPayload,
     BuildTaskRequest,
     BuildRequest,
+    CanvasImportRequest,
     CanvasPayload,
+    CanvasSnapshotRequest,
     DeltaSnapshotRequest,
+    DigitalBrainRecordPayload,
     ExplainBundleRequest,
     FileCreateRequest,
     FilePreviewRequest,
@@ -64,6 +69,7 @@ from context_vault_studio.services.workspace_builder import (
     build_workspace_from_config,
     evaluate_path_access,
     evaluate_relative_access,
+    merged_access_policy,
     matches_any,
     resolve_path_value,
 )
@@ -73,22 +79,26 @@ from context_vault_studio.storage import (
     APP_ID,
     APP_NAME,
     REPO_ROOT,
+    add_digital_brain_record,
     add_bookmark,
     attach_snapshot_bundle,
     append_build_history,
     append_snapshot,
     attach_digital_brain_index,
     delete_bookmark,
+    delete_digital_brain_record,
     delete_canvas,
     delete_preset,
     load_bookmarks,
     load_build_history,
     load_canvases,
+    load_canvas_templates,
     load_examples,
     load_layout,
     load_last_result,
     load_digital_brain_index,
     load_digital_brain_indexes,
+    load_digital_brain_records,
     load_presets,
     load_snapshot_bundle,
     load_snapshot_bundles,
@@ -101,6 +111,7 @@ from context_vault_studio.storage import (
     save_layout,
     save_last_result,
     save_workspace_config,
+    update_digital_brain_record,
     load_parallel_scan_profiles,
     load_delta_snapshots,
     load_explain_bundle,
@@ -108,7 +119,9 @@ from context_vault_studio.storage import (
     load_logic_profile,
     load_logic_profiles,
     upsert_canvas,
+    upsert_canvas_template,
     upsert_preset,
+    delete_canvas_template,
 )
 
 
@@ -232,9 +245,11 @@ def bootstrap() -> dict:
         "logic_profiles": load_logic_profiles()[:20],
         "explain_bundles": load_explain_bundles()[:20],
         "digital_brain_indexes": load_digital_brain_indexes()[:20],
+        "digital_brain_records": load_digital_brain_records()[:80],
         "digital_brain_adapter_contracts": list_digital_brain_source_adapter_contracts(),
         "build_adapter_capabilities": list_build_adapter_capabilities(),
         "canvases": load_canvases(),
+        "canvas_templates": load_canvas_templates(),
         "jobs": list_jobs()[:8],
         "last_result": load_last_result(),
     }
@@ -289,6 +304,124 @@ def remove_canvas(canvas_id: str) -> dict:
     return {"status": "ok", "id": canvas_id}
 
 
+@app.post("/api/canvases/import")
+def import_canvas(payload: CanvasImportRequest) -> dict:
+    source = Path(resolve_path_value(payload.path, base_dir=REPO_ROOT)).resolve()
+    if not source.exists() or not source.is_file():
+        raise HTTPException(status_code=404, detail="Canvas import file not found")
+    try:
+        raw = json.loads(source.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Canvas import file is not valid JSON") from exc
+    if isinstance(raw, dict) and raw.get("format_version") not in {None, 1, 2}:
+        raise HTTPException(status_code=400, detail="Canvas package version is not supported")
+    canvas_payload = raw.get("canvas") if isinstance(raw, dict) and "canvas" in raw else raw
+    existing_names = {item.get("name") for item in load_canvases()}
+    warnings: list[str] = []
+    if isinstance(canvas_payload, dict):
+        base_name = (canvas_payload.get("name") or "Imported board").strip() or "Imported board"
+        if base_name in existing_names:
+            suffix = 2
+            candidate = f"{base_name} (imported)"
+            while candidate in existing_names:
+                suffix += 1
+                candidate = f"{base_name} (imported {suffix})"
+            canvas_payload = {
+                **canvas_payload,
+                "name": candidate,
+            }
+            warnings.append(f"Canvas name already existed, so the import was renamed to {candidate}.")
+    try:
+        validated = CanvasPayload.model_validate(canvas_payload)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Canvas import payload is invalid") from exc
+    created = upsert_canvas(canvas_id=None, payload=validated.model_dump())
+    imported_scope_count = 0
+    imported_record_count = 0
+    imported_at = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+    if isinstance(raw, dict):
+        for scope in raw.get("linked_scopes", []) or []:
+            if not isinstance(scope, dict) or not scope.get("label"):
+                continue
+            metadata = scope.get("metadata") or {}
+            add_bookmark(
+                {
+                    "type": "canvas",
+                    "label": scope["label"],
+                    "metadata": {
+                        **metadata,
+                        "canvas_id": created["id"],
+                        "imported_from_canvas_id": metadata.get("canvas_id") or raw.get("canvas", {}).get("id"),
+                        "imported_at": imported_at,
+                    },
+                }
+            )
+            imported_scope_count += 1
+        for record in raw.get("linked_digital_brain_records", []) or []:
+            if not isinstance(record, dict) or not record.get("title") or not record.get("kind"):
+                continue
+            add_digital_brain_record(
+                {
+                    key: value
+                    for key, value in record.items()
+                    if key not in {"id", "created_at", "updated_at"}
+                }
+                | {
+                    "canvas_id": created["id"],
+                    "metadata": {
+                        **(record.get("metadata") or {}),
+                        "imported_from_record_id": record.get("id"),
+                        "imported_at": imported_at,
+                    },
+                }
+            )
+            imported_record_count += 1
+    return {
+        "status": "ok",
+        "canvas": created,
+        "imported_scope_count": imported_scope_count,
+        "imported_record_count": imported_record_count,
+        "warnings": warnings,
+    }
+
+
+@app.post("/api/canvases/{canvas_id}/snapshot")
+def snapshot_canvas(canvas_id: str, payload: CanvasSnapshotRequest) -> dict:
+    canvas = next((item for item in load_canvases() if item.get("id") == canvas_id), None)
+    if not canvas:
+        raise HTTPException(status_code=404, detail="Canvas not found")
+    return append_snapshot(
+        {
+            "kind": "canvas_state",
+            "label": payload.label or f"{canvas.get('name', 'Canvas')} board state",
+            "snapshot_bundle_id": payload.snapshot_bundle_id,
+            "snapshot_bundle_label": payload.snapshot_bundle_label,
+            "content": {"canvas": canvas},
+        }
+    )
+
+
+@app.get("/api/canvas-templates")
+def canvas_templates() -> list[dict]:
+    return load_canvas_templates()
+
+
+@app.post("/api/canvas-templates")
+def create_canvas_template(payload: CanvasPayload) -> dict:
+    return upsert_canvas_template(template_id=None, payload=payload.model_dump())
+
+
+@app.put("/api/canvas-templates/{template_id}")
+def update_canvas_template(template_id: str, payload: CanvasPayload) -> dict:
+    return upsert_canvas_template(template_id=template_id, payload=payload.model_dump())
+
+
+@app.delete("/api/canvas-templates/{template_id}")
+def remove_canvas_template(template_id: str) -> dict:
+    delete_canvas_template(template_id)
+    return {"status": "ok", "id": template_id}
+
+
 @app.get("/api/snapshots")
 def snapshots() -> list[dict]:
     return load_snapshots()
@@ -336,7 +469,7 @@ def create_explain_bundle(payload: ExplainBundleRequest) -> dict:
     if not snapshot:
         raise HTTPException(status_code=404, detail="Snapshot bundle not found")
     logic_profile = load_logic_profile(payload.logic_profile_id) if payload.logic_profile_id else None
-    return build_explain_bundle(snapshot, logic_profile)
+    return build_explain_bundle(snapshot, logic_profile, selected_files=payload.selected_files)
 
 
 @app.get("/api/digital-brain/contracts")
@@ -357,15 +490,41 @@ def digital_brain_index(index_id: str) -> dict:
     return payload
 
 
+@app.get("/api/digital-brain/records")
+def digital_brain_records() -> list[dict]:
+    return load_digital_brain_records()
+
+
+@app.post("/api/digital-brain/records")
+def create_digital_brain_record(payload: DigitalBrainRecordPayload) -> dict:
+    return add_digital_brain_record(payload.model_dump())
+
+
+@app.put("/api/digital-brain/records/{record_id}")
+def update_digital_brain_record_endpoint(record_id: str, payload: DigitalBrainRecordPayload) -> dict:
+    updated = update_digital_brain_record(record_id, payload.model_dump())
+    if not updated:
+        raise HTTPException(status_code=404, detail="Digital Brain record not found")
+    return updated
+
+
+@app.delete("/api/digital-brain/records/{record_id}")
+def remove_digital_brain_record(record_id: str) -> dict:
+    delete_digital_brain_record(record_id)
+    return {"status": "ok", "id": record_id}
+
+
 @app.get("/api/history/timeline")
 def history_timeline() -> list[dict]:
     return build_history_timeline(
         snapshot_bundles=load_snapshot_bundles(),
+        snapshots=load_snapshots(),
         delta_snapshots=load_delta_snapshots(),
         patch_previews=load_build_patch_previews(),
         apply_runs=load_build_apply_runs(),
         logic_profiles=load_logic_profiles(),
         explain_bundles=load_explain_bundles(),
+        canvas_scopes=[item for item in load_bookmarks() if item.get("type") == "canvas"],
     )
 
 
@@ -513,7 +672,11 @@ def live_monitor_flush(monitor_id: str) -> dict:
 @app.post("/api/logic/profile")
 def logic_profile(payload: LogicProfileRequest) -> dict:
     try:
-        return build_logic_profile(payload.config.model_dump(), max_workers=payload.max_workers)
+        return build_logic_profile(
+            payload.config.model_dump(),
+            max_workers=payload.max_workers,
+            selected_files=payload.selected_files,
+        )
     except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -646,9 +809,11 @@ def build_workspace(request: BuildRequest) -> dict:
 
 
 def _current_access_policy(explicit_access: dict | None = None) -> dict:
+    config = load_workspace_config()
     if explicit_access is not None:
-        return explicit_access
-    return load_workspace_config().get("access", {})
+        merged = {**config, "access": explicit_access}
+        return merged_access_policy(merged)
+    return merged_access_policy(config)
 
 
 def _path_allowed_for_app(path: Path, access: dict) -> tuple[bool, str]:
@@ -811,6 +976,17 @@ def restore_snapshot(payload: SnapshotRestorePayload) -> dict:
             save_last_result(result)
         return {"status": "ok", "kind": "model_state"}
 
+    if snapshot["kind"] == "canvas_state":
+        data = snapshot.get("content") or {}
+        canvas = data.get("canvas")
+        if not canvas:
+            raise HTTPException(status_code=400, detail="Canvas snapshot is missing payload")
+        restored = upsert_canvas(
+            canvas_id=canvas.get("id"),
+            payload={key: value for key, value in canvas.items() if key not in {"id", "created_at", "updated_at"}},
+        )
+        return {"status": "ok", "kind": "canvas_state", "canvas": restored}
+
     raise HTTPException(status_code=400, detail="Unsupported snapshot kind")
 
 
@@ -840,10 +1016,47 @@ def export_bundle() -> dict:
     }
 
 
+@app.post("/api/canvases/{canvas_id}/export")
+def export_canvas(canvas_id: str) -> dict:
+    canvas = next((item for item in load_canvases() if item.get("id") == canvas_id), None)
+    if not canvas:
+        raise HTTPException(status_code=404, detail="Canvas not found")
+
+    exports_dir = REPO_ROOT / "build" / "exports"
+    exports_dir.mkdir(parents=True, exist_ok=True)
+    export_path = exports_dir / f"canvas-board-{canvas_id}-{uuid.uuid4().hex[:6]}.json"
+    linked_scopes = [
+        item
+        for item in load_bookmarks()
+        if item.get("type") == "canvas" and (item.get("metadata") or {}).get("canvas_id") == canvas_id
+    ]
+    linked_digital_brain_records = [
+        item
+        for item in load_digital_brain_records()
+        if item.get("canvas_id") == canvas_id
+    ]
+    export_payload = {
+        "kind": "canvas_board_package",
+        "format_version": 2,
+        "app_id": APP_ID,
+        "app_name": APP_NAME,
+        "exported_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
+        "canvas": canvas,
+        "linked_scopes": linked_scopes,
+        "linked_digital_brain_records": linked_digital_brain_records,
+    }
+    export_path.write_text(json.dumps(export_payload, indent=2) + "\n", encoding="utf-8")
+    return {
+        "status": "ok",
+        "path": str(export_path),
+        "size_bytes": export_path.stat().st_size,
+    }
+
+
 @app.post("/api/path-inspect")
 def inspect_path(request: InspectPathRequest) -> dict:
     resolved = Path(resolve_path_value(request.path, base_dir=REPO_ROOT)).resolve()
-    access = request.access.model_dump() if request.access else load_workspace_config().get("access", {})
+    access = _current_access_policy(request.access.model_dump() if request.access else None)
     accessible, access_reason = evaluate_path_access(resolved, access)
     exists = resolved.exists()
     is_dir = resolved.is_dir()

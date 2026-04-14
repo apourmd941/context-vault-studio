@@ -31,6 +31,7 @@ export default function PreviewPane({
   outgoing,
   onSaveFile,
   onBookmarkFile,
+  onSendToCanvas,
 }) {
   const [draft, setDraft] = useState("");
   const [editing, setEditing] = useState(false);
@@ -50,6 +51,9 @@ export default function PreviewPane({
         </div>
         {selectedFile ? (
           <div className="hero__actions hero__actions--tight">
+            <button className="secondary-button" type="button" onClick={() => onSendToCanvas?.(selectedFile)}>
+              Send to canvas
+            </button>
             <button className="secondary-button" type="button" onClick={() => onBookmarkFile(selectedFile)}>
               Bookmark
             </button>
@@ -110,7 +114,11 @@ export default function PreviewPane({
           ) : null}
 
           {preview.kind === "binary" ? (
-            <div className="callout">Binary file preview is not rendered inline yet.</div>
+            <div className="artifact-row">
+              <strong>Binary file</strong>
+              <span>Inline preview is not available for this file type yet.</span>
+              <span>Use the metadata above to decide whether to bookmark it, exclude it, or keep it in scope.</span>
+            </div>
           ) : null}
 
           <div className="preview-sidecar">

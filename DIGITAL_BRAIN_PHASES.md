@@ -44,6 +44,49 @@ The repo already has:
 
 That means implementation should begin from a functioning shell, not from zero.
 
+## Implementation Status Snapshot
+
+Current phase status:
+
+- `DB1` complete
+- `DB2` complete
+- `DB3` complete
+- `DB4` mostly complete
+- `DB5` not started
+- `DB6` not started in a real semantic way
+- `DB7` substantially complete
+- `DB8` partially complete
+- `DB9` not started
+- `DB10` substantially complete
+- `DB11` not started
+- `DB12` partially complete
+- `DB13` not started
+
+What is already done:
+
+- Digital Brain has its own shell, setup language, and subtab structure
+- governed source adapter contracts and canonical index records exist
+- a surface-pass cognitive graph exists with project/topic/document/note/memory shells
+- first-pass decision candidates exist
+- promoted Canvas memory/decision items now become native stored Digital Brain records
+- promoted Canvas topic/task items now become native stored Digital Brain records
+- source-class sync policy and attention reasoning are now visible in Setup
+- Focus nodes now surface explicit `why surfaced` reasons and confidence
+- saved cognitive views can now be bookmarked from the Focus surface
+- promoted records can be reviewed with confidence and provenance notes
+
+What is still meaningfully remaining:
+
+- true selective sync policy by source class
+- hybrid retrieval and intent resolution
+- focused semantic enrichment
+- episode-backed memory extraction
+- evidence chains for decisions
+- attention cache and background enrichment
+- mature graph projections
+- Explain/Build handoff derived from native Digital Brain neighborhoods
+- connector growth and production hardening
+
 ## Foundational Architecture Decisions
 
 Digital Brain should be built on a governed ingestion and retrieval architecture, not on plain document search and not on generic vector search alone.
@@ -192,6 +235,9 @@ Digital Brain Shell and Setup
 Goal:
 - turn the duplicated shell into a real Digital Brain mode instead of a renamed Structure tab
 
+Status:
+- complete
+
 Deliverables:
 - Digital Brain-specific onboarding copy
 - Digital Brain-specific subtab set
@@ -222,6 +268,9 @@ Source Adapters and Canonical Storage
 
 Goal:
 - create the real ingestion foundation so Digital Brain can govern source access, sync, provenance, and normalized storage
+
+Status:
+- complete for the current local-first file-first scope
 
 Deliverables:
 - governed source adapter contracts
@@ -264,6 +313,9 @@ Surface Pass Cognitive Graph
 Goal:
 - produce a fast first Digital Brain graph from shallow metadata only
 
+Status:
+- complete for the current surface-pass slice
+
 Deliverables:
 - Digital Brain surface-pass pipeline
 - graph-shell node creation for:
@@ -298,6 +350,9 @@ Selective Ingestion and Sync Policy
 Goal:
 - make Digital Brain selective by design, not by accident
 
+Status:
+- mostly complete
+
 Deliverables:
 - approved-source registry for Digital Brain
 - source classes:
@@ -319,11 +374,24 @@ Success condition:
 - Digital Brain only deepens high-value scope
 - it does not behave like a broad disk crawler
 
+What is already done:
+- approved workspace remains the main source boundary
+- pinned and prioritized categories exist in setup
+- recent-file priority and graph density controls exist
+- sandbox/global exclusion rules are enforced upstream in Structure
+
+What is remaining:
+- true selective deeper-read execution beyond the current visible policy layer
+- stronger explicit scoring detail for why one object outranks another inside the same source class
+
 ### Phase DB5
 Graph-Grounded Hybrid Retrieval and Focus Engine
 
 Goal:
 - resolve likely user intent through hybrid retrieval and rank a small evidence-backed attention cluster
+
+Status:
+- not started
 
 Deliverables:
 - graph-grounded hybrid retrieval
@@ -360,6 +428,9 @@ Focused Semantic Pass
 Goal:
 - enrich only the items that have earned attention
 
+Status:
+- not started as a real selective semantic pipeline
+
 Deliverables:
 - deeper parsing for selected files/chats/notes
 - extracted signals:
@@ -381,6 +452,9 @@ Memory Extraction and Promotion Pipeline
 
 Goal:
 - turn communications and documents into episode-backed memory candidates, then promote only the strong ones
+
+Status:
+- substantially complete
 
 Deliverables:
 - episode model for:
@@ -429,11 +503,27 @@ Deliverables:
 Success condition:
 - Digital Brain never turns raw conversation directly into durable memory without provenance and promotion logic
 
+What is already done:
+- native memory and decision records exist
+- confidence and provenance-note fields exist
+- review status exists
+- Canvas can promote selected scopes into native records
+
+What is remaining:
+- episode model
+- extraction pipeline from communications/documents
+- scoring dimensions and promotion gates
+- confirm/demote/remove queue
+- richer provenance tiers
+
 ### Phase DB8
 Timeline and Decisions
 
 Goal:
 - let users trace how ideas, files, chats, and decisions evolved
+
+Status:
+- substantially complete
 
 Deliverables:
 - Timeline tab
@@ -449,11 +539,26 @@ Deliverables:
 Success condition:
 - user can see how a topic emerged and what decisions followed
 
+What is already done:
+- Timeline tab exists
+- Decisions tab exists
+- heuristic decision candidates exist
+- promoted decision records surface in the Decisions view
+
+What is remaining:
+- evidence chains
+- event linking across files/chats/notes
+- timeline grouping by project/topic/session
+- richer timeline semantics
+
 ### Phase DB9
 Attention Cache and Background Enrichment
 
 Goal:
 - make Digital Brain feel alive and fast during active use
+
+Status:
+- not started
 
 Deliverables:
 - attention cache for:
@@ -480,6 +585,9 @@ Digital Brain Graph Projections
 Goal:
 - stop treating Digital Brain as one giant graph view
 
+Status:
+- partially complete
+
 Deliverables:
 - Focus view
 - Memory view
@@ -501,11 +609,26 @@ Behavior differences from Structure:
 Success condition:
 - Digital Brain feels curated and cognitive instead of dense and topological
 
+What is already done:
+- Focus, Memory, Timeline, Decisions, Saved Graphs, and Advanced tabs exist
+- graph density settings exist
+- Digital Brain uses a cognitive surface-pass graph instead of the raw structure graph
+- Focus now shows explicit surfacing reasons and confidence for selected nodes
+- saved cognitive views can be captured and reopened from Saved Graphs
+
+What is remaining:
+- stronger per-view projection logic for timeline-heavy and decision-heavy views
+- confidence-biased graph behavior throughout
+- broader “why surfaced” explanations beyond the current Focus node detail
+
 ### Phase DB11
 Neutron Orb Integration
 
 Goal:
 - make the orb the live visual form of working attention
+
+Status:
+- not started
 
 Deliverables:
 - center node for current intent
@@ -529,6 +652,9 @@ Bridge to Explain and Build
 Goal:
 - turn Digital Brain into a first-class context handoff layer
 
+Status:
+- partially complete
+
 Deliverables:
 - pass context clusters into Explain
 - pass active project, relevant docs, recent decisions, and linked notes into Build
@@ -538,11 +664,23 @@ Deliverables:
 Success condition:
 - Digital Brain improves Explain and Build instead of living as an isolated retrieval layer
 
+What is already done:
+- Canvas-derived Digital Brain records can influence what the user selects next
+- Digital Brain lives in the same app workflow as Explain and Build
+
+What is remaining:
+- real cluster-to-Explain packets
+- real neighborhood-to-Build packets
+- evidence-first downstream summaries derived from Digital Brain context
+
 ### Phase DB13
 Connector Expansion, Review, and Production Hardening
 
 Goal:
 - widen source coverage carefully while preserving trust
+
+Status:
+- not started
 
 Deliverables:
 - optional connectors for:
@@ -577,19 +715,16 @@ Success condition:
 
 The best practical order from the current repo state is:
 
-1. `DB1` Shell and Setup
-2. `DB2` Source Adapters and Canonical Storage
-3. `DB3` Surface Pass Cognitive Graph
-4. `DB4` Selective Ingestion and Sync Policy
-5. `DB5` Graph-Grounded Hybrid Retrieval and Focus Engine
-6. `DB6` Focused Semantic Pass
-7. `DB7` Memory Extraction and Promotion Pipeline
-8. `DB8` Timeline and Decisions
-9. `DB9` Attention Cache and Background Enrichment
-10. `DB10` Graph Projections
-11. `DB12` Bridge to Explain and Build
-12. `DB11` Neutron Orb Integration
-13. `DB13` Connector Expansion, Review, and Production Hardening
+1. finish `DB4` Selective Ingestion and Sync Policy
+2. implement `DB5` Graph-Grounded Hybrid Retrieval and Focus Engine
+3. implement `DB6` Focused Semantic Pass
+4. deepen `DB7` Memory Extraction and Promotion Pipeline
+5. deepen `DB8` Timeline and Decisions
+6. deepen `DB10` Graph Projections
+7. finish `DB12` Bridge to Explain and Build
+8. implement `DB9` Attention Cache and Background Enrichment
+9. implement `DB11` Neutron Orb Integration
+10. implement `DB13` Connector Expansion, Review, and Production Hardening
 
 This order favors shipping useful behavior early rather than overbuilding the cognitive model before the UI and retrieval loop are usable.
 

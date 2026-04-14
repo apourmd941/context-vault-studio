@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -84,6 +85,395 @@ def test_preview_and_build_round_trip(tmp_path: Path, monkeypatch) -> None:
     detail_json = bundle_detail.json()
     assert detail_json["contents"]["file_manifest"]["summary"]["file_count"] == 2
     assert "architecture_summary" in detail_json["contents"]
+
+
+def test_canvas_round_trip_supports_viewport_and_group_cards(tmp_path: Path, monkeypatch) -> None:
+    client = make_client(tmp_path, monkeypatch)
+
+    created = client.post(
+        "/api/canvases",
+        json={
+            "name": "Architecture board",
+            "description": "Working board",
+            "viewport": {"x": 120, "y": 80, "zoom": 0.76},
+            "cards": [
+                {
+                    "id": "group-1",
+                    "type": "group",
+                    "label": "Core cluster",
+                    "note": "Group note",
+                    "x": 40,
+                    "y": 55,
+                    "width": 520,
+                    "height": 320,
+                    "color": "amber",
+                    "locked": True,
+                },
+                {
+                    "id": "text-1",
+                    "type": "text",
+                    "label": "Question",
+                    "text": "How do imports cross layers?",
+                    "x": 160,
+                    "y": 120,
+                    "width": 320,
+                    "height": 220,
+                    "color": "mint",
+                },
+            ],
+            "edges": [{"id": "edge-1", "from_card": "group-1", "to_card": "text-1", "label": "contains", "color": "mint"}],
+        },
+    )
+    assert created.status_code == 200
+    created_json = created.json()
+    assert created_json["viewport"]["zoom"] == 0.76
+    assert created_json["cards"][0]["type"] == "group"
+    assert created_json["cards"][0]["locked"] is True
+
+    updated = client.put(
+        f"/api/canvases/{created_json['id']}",
+        json={
+            "name": "Architecture board",
+            "description": "Updated board",
+            "viewport": {"x": 180, "y": 90, "zoom": 0.92},
+            "cards": [
+                {
+                    "id": "group-1",
+                    "type": "group",
+                    "label": "Core cluster",
+                    "note": "Updated note",
+                    "x": 40,
+                    "y": 55,
+                    "width": 520,
+                    "height": 320,
+                    "color": "amber",
+                    "locked": True,
+                }
+            ],
+            "edges": [],
+        },
+    )
+    assert updated.status_code == 200
+    updated_json = updated.json()
+    assert updated_json["description"] == "Updated board"
+    assert updated_json["viewport"]["x"] == 180
+
+    canvases = client.get("/api/canvases")
+    assert canvases.status_code == 200
+    canvases_json = canvases.json()
+    saved = next(canvas for canvas in canvases_json if canvas["id"] == created_json["id"])
+    assert saved["viewport"]["zoom"] == 0.92
+    assert saved["cards"][0]["note"] == "Updated note"
+
+
+def test_logic_and_explain_can_be_scoped_to_selected_files(tmp_path: Path, monkeypatch) -> None:
+    source_dir = tmp_path / "docs"
+    source_dir.mkdir()
+    (source_dir / "README.md").write_text("# Readme\n\nTop file\n", encoding="utf-8")
+    (source_dir / "NOTES.md").write_text("# Notes\n\nSecond file\n", encoding="utf-8")
+
+    client = make_client(tmp_path, monkeypatch)
+    config = {
+        "vault_name": "Scoped Flow",
+        "output_dir": str(tmp_path / "output"),
+        "default_mode": "copy",
+        "max_file_size_bytes": 5000000,
+        "default_exclude": [],
+        "default_include": [],
+        "sources": [
+            {
+                "name": "docs",
+                "category": "Docs",
+                "path": str(source_dir),
+                "include": ["*.md"],
+                "exclude": [],
+            }
+        ],
+    }
+
+    logic = client.post(
+        "/api/logic/profile",
+        json={
+            "config": config,
+            "max_workers": 2,
+            "selected_files": ["README.md"],
+        },
+    )
+    assert logic.status_code == 200
+    logic_json = logic.json()
+    assert logic_json["profile"]["summary"]["file_count"] == 1
+    assert logic_json["record"]["label"].endswith("(scoped)")
+
+    preview = client.post("/api/preview", json={"config": config, "clean": True})
+    assert preview.status_code == 200
+    snapshot_bundle_id = preview.json()["snapshot_bundle"]["id"]
+
+    explain = client.post(
+        "/api/explain/bundles",
+        json={
+            "snapshot_bundle_id": snapshot_bundle_id,
+            "logic_profile_id": logic_json["record"]["id"],
+            "selected_files": ["README.md"],
+        },
+    )
+    assert explain.status_code == 200
+    explain_json = explain.json()
+    assert explain_json["bundle"]["summary"]["top_file_count"] == 1
+    assert explain_json["bundle"]["summary"]["selected_file_count"] == 1
+    assert explain_json["bundle"]["top_files"][0]["rel_path"] == "README.md"
+
+
+def test_canvas_bookmark_metadata_round_trip(tmp_path: Path, monkeypatch) -> None:
+    client = make_client(tmp_path, monkeypatch)
+    response = client.post(
+        "/api/bookmarks",
+        json={
+            "type": "canvas",
+            "label": "Core scope",
+            "metadata": {
+                "canvas_id": "main-canvas",
+                "selected_files": ["README.md", "SPEC.md"],
+                "lane": "structure",
+            },
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["type"] == "canvas"
+    assert payload["metadata"]["canvas_id"] == "main-canvas"
+    assert payload["metadata"]["selected_files"] == ["README.md", "SPEC.md"]
+
+
+def test_canvas_templates_export_and_history_scope_entries(tmp_path: Path, monkeypatch) -> None:
+    client = make_client(tmp_path, monkeypatch)
+
+    created = client.post(
+        "/api/canvas-templates",
+        json={
+            "name": "Template A",
+            "description": "Reusable layout",
+            "cards": [],
+            "edges": [],
+            "viewport": {"x": 40, "y": 40, "zoom": 0.8},
+        },
+    )
+    assert created.status_code == 200
+    template = created.json()
+
+    updated = client.put(
+        f"/api/canvas-templates/{template['id']}",
+        json={
+            "name": "Template A",
+            "description": "Updated reusable layout",
+            "cards": [],
+            "edges": [],
+            "viewport": {"x": 80, "y": 60, "zoom": 0.9},
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["viewport"]["zoom"] == 0.9
+
+    templates = client.get("/api/canvas-templates")
+    assert templates.status_code == 200
+    assert any(item["id"] == template["id"] for item in templates.json())
+
+    bookmark = client.post(
+        "/api/bookmarks",
+        json={
+            "type": "canvas",
+            "label": "Saved scope",
+            "metadata": {
+                "canvas_id": "main-canvas",
+                "selected_files": ["README.md"],
+                "snapshot_bundle_id": "snapshot-1",
+                "selected_card_labels": ["Core notes"],
+            },
+        },
+    )
+    assert bookmark.status_code == 200
+
+    record = client.post(
+        "/api/digital-brain/records",
+        json={
+            "kind": "topic",
+            "title": "Topic: Core notes",
+            "summary": "Imported from canvas export",
+            "selected_files": ["README.md"],
+            "source_scope_label": "Saved scope",
+            "canvas_id": "main-canvas",
+        },
+    )
+    assert record.status_code == 200
+
+    export = client.post("/api/canvases/main-canvas/export")
+    assert export.status_code == 200
+    export_json = export.json()
+    export_path = Path(export_json["path"])
+    assert export_path.exists()
+    export_payload = json.loads(export_path.read_text(encoding="utf-8"))
+    assert export_payload["format_version"] == 2
+    assert export_payload["kind"] == "canvas_board_package"
+    assert export_payload["linked_scopes"][0]["label"] == "Saved scope"
+    assert export_payload["linked_digital_brain_records"][0]["kind"] == "topic"
+
+    timeline = client.get("/api/history/timeline")
+    assert timeline.status_code == 200
+    kinds = {item["kind"] for item in timeline.json()}
+    assert "canvas_scope" in kinds
+
+
+def test_canvas_import_and_snapshot_restore_round_trip(tmp_path: Path, monkeypatch) -> None:
+    client = make_client(tmp_path, monkeypatch)
+
+    export_source = tmp_path / "canvas-import.json"
+    export_source.write_text(
+        (
+            '{"format_version":2,"canvas":{"name":"Imported board","description":"Imported","cards":[],"edges":[],'
+            '"viewport":{"x":10,"y":20,"zoom":0.7},"metadata":{"workflow":"architecture-review"}},'
+            '"linked_scopes":[{"label":"Imported scope","metadata":{"canvas_id":"legacy-canvas","selected_files":["README.md"]}}],'
+            '"linked_digital_brain_records":[{"kind":"task","title":"Task: Follow up","summary":"Imported record","selected_files":["README.md"],'
+            '"source_scope_label":"Imported scope","canvas_id":"legacy-canvas"}]}\n'
+        ),
+        encoding="utf-8",
+    )
+
+    imported = client.post("/api/canvases/import", json={"path": str(export_source)})
+    assert imported.status_code == 200
+    imported_json = imported.json()
+    canvas = imported_json["canvas"]
+    assert canvas["name"] == "Imported board"
+    assert canvas["metadata"]["workflow"] == "architecture-review"
+    assert imported_json["imported_scope_count"] == 1
+    assert imported_json["imported_record_count"] == 1
+
+    bookmarks = client.get("/api/bookmarks")
+    assert bookmarks.status_code == 200
+    imported_scope = next(item for item in bookmarks.json() if item["type"] == "canvas")
+    assert imported_scope["metadata"]["canvas_id"] == canvas["id"]
+
+    records = client.get("/api/digital-brain/records")
+    assert records.status_code == 200
+    imported_record = next(item for item in records.json() if item["kind"] == "task")
+    assert imported_record["canvas_id"] == canvas["id"]
+
+    updated = client.put(
+        f"/api/canvases/{canvas['id']}",
+        json={
+            "name": "Imported board changed",
+            "description": "Changed",
+            "cards": [],
+            "edges": [],
+            "viewport": {"x": 30, "y": 40, "zoom": 1.1},
+            "metadata": {"workflow": "architecture-review"},
+        },
+    )
+    assert updated.status_code == 200
+
+    snapshot = client.post(
+        f"/api/canvases/{canvas['id']}/snapshot",
+        json={"label": "Imported board state", "snapshot_bundle_id": "bundle-1", "snapshot_bundle_label": "Bundle 1"},
+    )
+    assert snapshot.status_code == 200
+    snapshot_id = snapshot.json()["id"]
+
+    second_update = client.put(
+        f"/api/canvases/{canvas['id']}",
+        json={
+            "name": "Imported board later",
+            "description": "Later",
+            "cards": [],
+            "edges": [],
+            "viewport": {"x": 99, "y": 99, "zoom": 1.4},
+            "metadata": {"workflow": "architecture-review"},
+        },
+    )
+    assert second_update.status_code == 200
+
+    restored = client.post("/api/snapshots/restore", json={"snapshot_id": snapshot_id})
+    assert restored.status_code == 200
+    assert restored.json()["kind"] == "canvas_state"
+
+    canvases = client.get("/api/canvases")
+    assert canvases.status_code == 200
+    restored_canvas = next(item for item in canvases.json() if item["id"] == canvas["id"])
+    assert restored_canvas["name"] == "Imported board changed"
+
+    timeline = client.get("/api/history/timeline")
+    assert timeline.status_code == 200
+    assert "canvas_state" in {item["kind"] for item in timeline.json()}
+
+
+def test_canvas_import_renames_when_name_conflicts(tmp_path: Path, monkeypatch) -> None:
+    client = make_client(tmp_path, monkeypatch)
+
+    export_source = tmp_path / "canvas-conflict.json"
+    export_source.write_text(
+        '{"format_version":2,"canvas":{"name":"Main Canvas","description":"Imported","cards":[],"edges":[],"viewport":{"x":10,"y":20,"zoom":0.7}}}\n',
+        encoding="utf-8",
+    )
+
+    imported = client.post("/api/canvases/import", json={"path": str(export_source)})
+    assert imported.status_code == 200
+    payload = imported.json()
+    assert payload["canvas"]["name"].startswith("Main Canvas (imported")
+    assert payload["warnings"]
+
+
+def test_digital_brain_record_round_trip(tmp_path: Path, monkeypatch) -> None:
+    client = make_client(tmp_path, monkeypatch)
+
+    created = client.post(
+        "/api/digital-brain/records",
+        json={
+            "kind": "memory",
+            "title": "Memory: core architecture",
+            "summary": "Promoted from canvas",
+            "selected_files": ["README.md", "docs/ARCHITECTURE.md"],
+            "source_scope_label": "Architecture board",
+            "canvas_id": "main-canvas",
+            "snapshot_bundle_id": "bundle-1",
+            "snapshot_bundle_label": "Bundle 1",
+            "status": "promoted",
+            "confidence": 0.81,
+        },
+    )
+    assert created.status_code == 200
+    payload = created.json()
+    assert payload["kind"] == "memory"
+    assert payload["selected_files"] == ["README.md", "docs/ARCHITECTURE.md"]
+
+    records = client.get("/api/digital-brain/records")
+    assert records.status_code == 200
+    assert any(item["id"] == payload["id"] for item in records.json())
+
+    bootstrap = client.get("/api/bootstrap")
+    assert bootstrap.status_code == 200
+    assert any(item["id"] == payload["id"] for item in bootstrap.json()["digital_brain_records"])
+
+    updated = client.put(
+        f"/api/digital-brain/records/{payload['id']}",
+        json={
+            "kind": "memory",
+            "title": "Memory: core architecture",
+            "summary": "Reviewed and approved",
+            "selected_files": ["README.md"],
+            "source_scope_label": "Architecture board",
+            "canvas_id": "main-canvas",
+            "snapshot_bundle_id": "bundle-1",
+            "snapshot_bundle_label": "Bundle 1",
+            "status": "promoted",
+            "confidence": 0.9,
+            "review_status": "approved",
+            "provenance_notes": "Confirmed from board review.",
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["review_status"] == "approved"
+
+    deleted = client.delete(f"/api/digital-brain/records/{payload['id']}")
+    assert deleted.status_code == 200
+    records_after = client.get("/api/digital-brain/records")
+    assert all(item["id"] != payload["id"] for item in records_after.json())
 
 
 def test_preview_graph_includes_folder_hierarchy_nodes(tmp_path: Path, monkeypatch) -> None:

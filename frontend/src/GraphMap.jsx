@@ -78,7 +78,7 @@ function focusNode(graphRef, node, transitionMs = 900) {
 }
 
 
-export default function GraphMap({ graph, onSelectNode }) {
+export default function GraphMap({ graph, onSelectNode, onAddNodeToCanvas }) {
   const deferredGraph = useDeferredValue(graph);
   const inlineGraphRef = useRef();
   const modalGraphRef = useRef();
@@ -746,6 +746,11 @@ export default function GraphMap({ graph, onSelectNode }) {
                   </div>
                 </div>
                 {selectedNode.summary ? <p className="graph-summary">{selectedNode.summary}</p> : null}
+                <div className="hero__actions hero__actions--tight">
+                  <button className="secondary-button" type="button" onClick={() => onAddNodeToCanvas?.(selectedNode)}>
+                    Add to canvas
+                  </button>
+                </div>
               </>
             ) : (
               <p className="empty-copy">Choose a node to inspect its details.</p>
